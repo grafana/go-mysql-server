@@ -16,6 +16,7 @@ package plan
 
 import (
 	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/dolthub/go-mysql-server/sql/types"
 )
 
 // Describe is a node that describes its children.
@@ -103,6 +104,7 @@ func (*DescribeQuery) CollationCoercibility(ctx *sql.Context) (collation sql.Col
 // DescribeSchema is the schema returned by a DescribeQuery node.
 var DescribeSchema = sql.Schema{
 	{Name: "plan", Type: VarChar25000},
+	{Name: "rows", Type: types.Uint32},
 }
 
 // NewDescribeQuery creates a new DescribeQuery node.

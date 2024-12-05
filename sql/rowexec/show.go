@@ -78,7 +78,7 @@ func (b *BaseBuilder) buildDescribeQuery(ctx *sql.Context, n *plan.DescribeQuery
 
 	for _, l := range strings.Split(formatString, "\n") {
 		if strings.TrimSpace(l) != "" {
-			rows = append(rows, sql.NewRow(l))
+			rows = append(rows, sql.NewRow(l, 1))
 		}
 	}
 	return sql.RowsToRowIter(rows...), nil
