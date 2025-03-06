@@ -39,6 +39,22 @@ type JSONStringer interface {
 	JSONString() (string, error)
 }
 
+func WriteJSONTo(js sql.JSONWrapper, wr io.Writer) error {
+	if stringer, ok := js.(JSONStringer); ok {
+		str, err := stringer.JSONString()
+		if err != nil {
+			return err
+		}
+		_, err = io.WriteString(wr, str)
+		return err
+	}
+	val, err := js.ToInterface()
+	if err != nil {
+		return err
+	}
+	return writeMarshalledValue(wr, val)
+}
+
 // StringifyJSON generates a string representation of a sql.JSONWrapper that is compatible with MySQL's JSON output, including spaces.
 func StringifyJSON(jsonWrapper sql.JSONWrapper) (string, error) {
 	if stringer, ok := jsonWrapper.(JSONStringer); ok {

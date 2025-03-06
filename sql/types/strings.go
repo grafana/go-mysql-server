@@ -310,7 +310,7 @@ func (t StringType) Convert(v interface{}) (interface{}, sql.ConvertInRange, err
 		return nil, sql.InRange, nil
 	}
 
-	val, err := ConvertToString(v, t, nil)
+	val, err := ConvertToString(v, t)
 	if err != nil {
 		return nil, sql.OutOfRange, err
 	}
@@ -321,78 +321,82 @@ func (t StringType) Convert(v interface{}) (interface{}, sql.ConvertInRange, err
 	return val, sql.InRange, nil
 }
 
-func ConvertToString(v interface{}, t sql.StringType, dest []byte) (string, error) {
-	ret, err := ConvertToBytes(v, t, dest)
-	return string(ret), err
+func ConvertToString(v interface{}, t sql.StringType) (string, error) {
+	var buf bytes.Buffer
+	err := ConvertToBytes(v, t, &buf)
+	if err != nil {
+		return "", err
+	}
+	return string(buf.Bytes()), nil
 }
 
-func ConvertToBytes(v interface{}, t sql.StringType, dest []byte) ([]byte, error) {
-	var val []byte
-	start := len(dest)
+func ConvertToBytes(v interface{}, t sql.StringType, dest *bytes.Buffer) error {
+	val := dest.AvailableBuffer()
 	switch s := v.(type) {
 	case bool:
 		if s {
-			val = append(dest, '1')
+			val = append(val, '1')
 		} else {
-			val = append(dest, '0')
+			val = append(val, '0')
 		}
 	case float64:
-		val = strconv.AppendFloat(dest, s, 'f', -1, 64)
-		if len(val) == 2 && val[start] == '-' && val[start+1] == '0' {
-			val = val[start+1:]
+		val = strconv.AppendFloat(val, s, 'f', -1, 64)
+		if len(val) == 2 && val[0] == '-' && val[1] == '0' {
+			val = val[1:]
 		}
 	case float32:
-		val = strconv.AppendFloat(dest, float64(s), 'f', -1, 32)
-		if len(val) == 2 && val[start] == '-' && val[start+1] == '0' {
-			val = val[start+1:]
+		val = strconv.AppendFloat(val, float64(s), 'f', -1, 32)
+		if len(val) == 2 && val[0] == '-' && val[1] == '0' {
+			val = val[1:]
 		}
 	case int:
-		val = strconv.AppendInt(dest, int64(s), 10)
+		val = strconv.AppendInt(val, int64(s), 10)
 	case int8:
-		val = strconv.AppendInt(dest, int64(s), 10)
+		val = strconv.AppendInt(val, int64(s), 10)
 	case int16:
-		val = strconv.AppendInt(dest, int64(s), 10)
+		val = strconv.AppendInt(val, int64(s), 10)
 	case int32:
-		val = strconv.AppendInt(dest, int64(s), 10)
+		val = strconv.AppendInt(val, int64(s), 10)
 	case int64:
-		val = strconv.AppendInt(dest, s, 10)
+		val = strconv.AppendInt(val, s, 10)
 	case uint:
-		val = strconv.AppendUint(dest, uint64(s), 10)
+		val = strconv.AppendUint(val, uint64(s), 10)
 	case uint8:
-		val = strconv.AppendUint(dest, uint64(s), 10)
+		val = strconv.AppendUint(val, uint64(s), 10)
 	case uint16:
-		val = strconv.AppendUint(dest, uint64(s), 10)
+		val = strconv.AppendUint(val, uint64(s), 10)
 	case uint32:
-		val = strconv.AppendUint(dest, uint64(s), 10)
+		val = strconv.AppendUint(val, uint64(s), 10)
 	case uint64:
-		val = strconv.AppendUint(dest, s, 10)
+		val = strconv.AppendUint(val, s, 10)
 	case string:
-		val = append(dest, s...)
+		val = append(val, s...)
 	case []byte:
-		val = append(dest, s...)
+		val = append(val, s...)
 	case time.Time:
-		val = s.AppendFormat(dest, sql.TimestampDatetimeLayout)
+		val = s.AppendFormat(val, sql.TimestampDatetimeLayout)
 	case decimal.Decimal:
-		val = append(dest, s.StringFixed(s.Exponent()*-1)...)
+		val = append(val, s.StringFixed(s.Exponent()*-1)...)
 	case decimal.NullDecimal:
 		if !s.Valid {
-			return nil, nil
+			return nil
 		}
-		val = append(dest, s.Decimal.String()...)
+		val = append(val, s.Decimal.String()...)
 	case sql.JSONWrapper:
 		jsonString, err := StringifyJSON(s)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		st, err := strings.Unquote(jsonString)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		val = append(dest, st...)
+		val = append(val, st...)
 	case GeometryValue:
-		return s.Serialize(), nil
+		dest.Write(s.Serialize())
+		return nil
 	default:
-		return nil, sql.ErrConvertToSQL.New(s, t)
+		return sql.ErrConvertToSQL.New(s, t)
 	}
 
 	// TODO: add this checking to the interface, rather than relying on the StringType implementation
@@ -401,20 +405,20 @@ func ConvertToBytes(v interface{}, t sql.StringType, dest []byte) ([]byte, error
 		if st.baseType == sqltypes.Text {
 			// for TEXT types, we use the byte length instead of the character length
 			if int64(len(val)) > st.maxByteLength {
-				return nil, ErrLengthBeyondLimit.New(val, t.String())
+				return ErrLengthBeyondLimit.New(val, t.String())
 			}
 		} else {
 			if t.CharacterSet().MaxLength() == 1 {
 				// if the character set only has a max size of 1, we can just count the bytes
 				if int64(len(val)) > st.maxCharLength {
-					return nil, ErrLengthBeyondLimit.New(val, t.String())
+					return ErrLengthBeyondLimit.New(val, t.String())
 				}
 			} else {
 				// TODO: this should count the string's length properly according to the character set
 				// convert 'val' string to rune to count the character length, not byte length
 				if int64(len(val)) > st.maxCharLength {
 					if int64(len([]rune(string(val)))) > st.maxCharLength {
-						return nil, ErrLengthBeyondLimit.New(val, t.String())
+						return ErrLengthBeyondLimit.New(val, t.String())
 					}
 				}
 			}
@@ -424,7 +428,6 @@ func ConvertToBytes(v interface{}, t sql.StringType, dest []byte) ([]byte, error
 			val = append(val, bytes.Repeat([]byte{0}, int(st.maxCharLength)-len(val))...)
 		}
 	}
-	val = val[start:]
 
 	// TODO: Completely unsure how this should actually be handled.
 	// We need to handle the conversion to the correct character set, but we only need to do it once. At this point, we
@@ -435,20 +438,19 @@ func ConvertToBytes(v interface{}, t sql.StringType, dest []byte) ([]byte, error
 	// On top of that, we internally only work with UTF8MB4 strings, so we'll make a hard assumption that all UTF8
 	// strings are valid for all character sets, and that all invalid UTF8 strings have not yet been converted.
 	// This isn't correct, but it's a better approximation than the old logic.
-	bytesVal := val
-	if !IsBinaryType(t) && !utf8.Valid(bytesVal) {
+	if !IsBinaryType(t) && !utf8.Valid(val) {
 		charset := t.CharacterSet()
 		if charset == sql.CharacterSet_utf8mb4 {
-			return nil, ErrBadCharsetString.New(charset.String(), bytesVal)
+			return ErrBadCharsetString.New(charset.String(), val)
 		} else {
-			var ok bool
-			if bytesVal, ok = t.CharacterSet().Encoder().Decode(bytesVal); !ok {
-				return nil, ErrBadCharsetString.New(charset.String(), bytesVal)
+			if _, ok := t.CharacterSet().Encoder().Decode(val); !ok {
+				return ErrBadCharsetString.New(charset.String(), val)
 			}
 		}
 	}
 
-	return val, nil
+	dest.Write(val)
+	return nil
 }
 
 // ConvertToCollatedString returns the given interface as a string, along with its collation. If the Type possess a
@@ -515,18 +517,18 @@ func (t StringType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t StringType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t StringType) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	var err error
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 
-	start := len(dest)
-	var val []byte
+	var start int
 	if IsBinaryType(t) {
-		val, err = ConvertToBytes(v, t, dest)
+		start = dest.Len()
+		err = ConvertToBytes(v, t, dest)
 		if err != nil {
-			return sqltypes.Value{}, err
+			return sql.BufSQLValue{}, err
 		}
 	} else {
 		var valueBytes []byte
@@ -534,56 +536,57 @@ func (t StringType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.
 		case JSONBytes:
 			valueBytes, err = v.GetBytes()
 			if err != nil {
-				return sqltypes.Value{}, err
+				return sql.BufSQLValue{}, err
 			}
 		case []byte:
 			valueBytes = v
 		case string:
-			dest = append(dest, v...)
-			valueBytes = dest[start:]
+			valueBytes = []byte(v)
 		case int, int8, int16, int32, int64:
 			num, _, err := convertToInt64(Int64.(NumberTypeImpl_), v)
 			if err != nil {
-				return sqltypes.Value{}, err
+				return sql.BufSQLValue{}, err
 			}
-			valueBytes = strconv.AppendInt(dest, num, 10)
+			valueBytes = strconv.AppendInt(dest.AvailableBuffer(), num, 10)
+			start = dest.Len()
 		case uint, uint8, uint16, uint32, uint64:
 			num, _, err := convertToUint64(Int64.(NumberTypeImpl_), v)
 			if err != nil {
-				return sqltypes.Value{}, err
+				return sql.BufSQLValue{}, err
 			}
-			valueBytes = strconv.AppendUint(dest, num, 10)
+			valueBytes = strconv.AppendUint(dest.AvailableBuffer(), num, 10)
 		case bool:
 			if v {
-				dest = append(dest, '1')
+				valueBytes = []byte{'1'}
 			} else {
-				dest = append(dest, '0')
+				valueBytes = []byte{'0'}
 			}
-			valueBytes = dest[start:]
 		case float64:
-			valueBytes = strconv.AppendFloat(dest, v, 'f', -1, 64)
-			if valueBytes[start] == '-' {
-				valueBytes = valueBytes[start+1:]
+			valueBytes = strconv.AppendFloat(dest.AvailableBuffer(), v, 'f', -1, 64)
+			if valueBytes[0] == '-' {
+				valueBytes = valueBytes[1:]
 			}
 		case float32:
-			valueBytes = strconv.AppendFloat(dest, float64(v), 'f', -1, 32)
-			if valueBytes[start] == '-' {
-				valueBytes = valueBytes[start+1:]
+			valueBytes = strconv.AppendFloat(dest.AvailableBuffer(), float64(v), 'f', -1, 32)
+			if valueBytes[0] == '-' {
+				valueBytes = valueBytes[1:]
 			}
 		default:
-			valueBytes, err = ConvertToBytes(v, t, dest)
+			vbStart := dest.Len()
+			err = ConvertToBytes(v, t, dest)
+			if err != nil {
+				return sql.BufSQLValue{}, err
+			}
+			valueBytes = dest.Bytes()[vbStart:]
 		}
-		if t.baseType == sqltypes.Binary {
-			val = append(val, bytes.Repeat([]byte{0}, int(t.maxCharLength)-len(val))...)
-		}
-		if !IsBinaryType(t) && !utf8.Valid(valueBytes) {
+		if !utf8.Valid(valueBytes) {
 			charset := t.CharacterSet()
 			if charset == sql.CharacterSet_utf8mb4 {
-				return sqltypes.Value{}, ErrBadCharsetString.New(charset.String(), valueBytes)
+				return sql.BufSQLValue{}, ErrBadCharsetString.New(charset.String(), valueBytes)
 			} else {
 				var ok bool
 				if valueBytes, ok = t.CharacterSet().Encoder().Decode(valueBytes); !ok {
-					return sqltypes.Value{}, ErrBadCharsetString.New(charset.String(), valueBytes)
+					return sql.BufSQLValue{}, ErrBadCharsetString.New(charset.String(), valueBytes)
 				}
 			}
 		}
@@ -599,13 +602,14 @@ func (t StringType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.
 				snippet = snippet[:50]
 			}
 			snippetStr := strings2.ToValidUTF8(string(snippet), string(utf8.RuneError))
-			return sqltypes.Value{}, sql.ErrCharSetFailedToEncode.New(resultCharset.Name(), utf8.ValidString(snippetStr), snippet)
+			return sql.BufSQLValue{}, sql.ErrCharSetFailedToEncode.New(resultCharset.Name(), utf8.ValidString(snippetStr), snippet)
 		}
-		//val = AppendAndSliceBytes(dest, encodedBytes)
-		val = encodedBytes
+
+		start = dest.Len()
+		dest.Write(encodedBytes)
 	}
 
-	return sqltypes.MakeTrusted(t.baseType, val), nil
+	return sql.BufSQLValue{Typ: t.baseType, Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

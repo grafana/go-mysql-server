@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -406,219 +407,213 @@ func (t NumberTypeImpl_) Promote() sql.Type {
 	}
 }
 
-func (t NumberTypeImpl_) SQLInt8(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLInt8(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, _, err := convertToInt64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if num > math.MaxInt8 {
 		num = int64(math.MaxInt8)
 	} else if num < math.MinInt8 {
 		num = int64(math.MinInt8)
 	}
-	dest = strconv.AppendInt(dest, num, 10)
-	return dest, nil
+	dest.Write(strconv.AppendInt(dest.AvailableBuffer(), num, 10))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLInt16(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLInt16(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, _, err := convertToInt64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if num > math.MaxInt16 {
 		num = int64(math.MaxInt16)
 	} else if num < math.MinInt16 {
 		num = int64(math.MinInt16)
 	}
-	dest = strconv.AppendInt(dest, num, 10)
-	return dest, nil
+	dest.Write(strconv.AppendInt(dest.AvailableBuffer(), num, 10))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLInt24(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLInt24(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, _, err := convertToInt64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if num > (1<<23 - 1) {
 		num = int64(1<<23 - 1)
 	} else if num < (-1 << 23) {
 		num = int64(-1 << 23)
 	}
-	dest = strconv.AppendInt(dest, num, 10)
-	return dest, nil
+	dest.Write(strconv.AppendInt(dest.AvailableBuffer(), num, 10))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLInt32(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLInt32(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, _, err := convertToInt64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if num > math.MaxInt32 {
 		num = math.MaxInt32
 	} else if num < math.MinInt32 {
 		num = math.MinInt32
 	}
-	dest = strconv.AppendInt(dest, num, 10)
-	return dest, nil
+	dest.Write(strconv.AppendInt(dest.AvailableBuffer(), num, 10))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLInt64(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLInt64(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	vt, _, err := convertToInt64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	dest = strconv.AppendInt(dest, vt, 10)
-	return dest, nil
+	dest.Write(strconv.AppendInt(dest.AvailableBuffer(), vt, 10))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLUint8(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLUint8(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, _, err := convertToUint64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if num > math.MaxUint8 {
 		num = uint64(math.MaxUint8)
 	}
-	dest = strconv.AppendUint(dest, num, 10)
-
-	return dest, nil
+	dest.Write(strconv.AppendUint(dest.AvailableBuffer(), num, 10))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLUint16(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLUint16(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, _, err := convertToUint64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if num > math.MaxUint16 {
 		num = uint64(math.MaxUint16)
 	}
-	dest = strconv.AppendUint(dest, num, 10)
-
-	return dest, nil
+	dest.Write(strconv.AppendUint(dest.AvailableBuffer(), num, 10))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLUint24(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLUint24(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, _, err := convertToUint64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if num > (1 << 24) {
 		num = uint64((1 << 24))
 	}
-	dest = strconv.AppendUint(dest, num, 10)
-
-	return dest, nil
+	dest.Write(strconv.AppendUint(dest.AvailableBuffer(), num, 10))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLUint32(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLUint32(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, _, err := convertToUint64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if num > math.MaxUint32 {
 		num = uint64(math.MaxUint32)
 	}
-	dest = strconv.AppendUint(dest, num, 10)
-
-	return dest, nil
+	dest.Write(strconv.AppendUint(dest.AvailableBuffer(), num, 10))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLUint64(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLUint64(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, _, err := convertToUint64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if num > math.MaxUint64 {
 		num = uint64(math.MaxUint64)
 	}
-	dest = strconv.AppendUint(dest, num, 10)
-
-	return dest, nil
+	dest.Write(strconv.AppendUint(dest.AvailableBuffer(), num, 10))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLFloat64(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLFloat64(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, err := convertToFloat64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	dest = strconv.AppendFloat(dest, num, 'g', -1, 64)
-	return dest, nil
+	dest.Write(strconv.AppendFloat(dest.AvailableBuffer(), num, 'g', -1, 64))
+	return nil
 }
 
-func (t NumberTypeImpl_) SQLFloat32(ctx *sql.Context, dest []byte, v interface{}) ([]byte, error) {
+func (t NumberTypeImpl_) SQLFloat32(ctx *sql.Context, dest *bytes.Buffer, v interface{}) error {
 	num, err := convertToFloat64(t, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if num > math.MaxFloat32 {
 		num = float64(math.MaxFloat32)
 	} else if num < -math.MaxFloat32 {
 		num = float64(-math.MaxFloat32)
 	}
-	dest = strconv.AppendFloat(dest, num, 'g', -1, 32)
-	return dest, nil
+	dest.Write(strconv.AppendFloat(dest.AvailableBuffer(), num, 'g', -1, 32))
+	return nil
 }
 
 // SQL implements Type interface.
-func (t NumberTypeImpl_) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t NumberTypeImpl_) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 
 	var err error
 	if jv, ok := v.(sql.JSONWrapper); ok {
 		v, err = jv.ToInterface()
 		if err != nil {
-			return sqltypes.Value{}, err
+			return sql.BufSQLValue{}, err
 		}
 	}
 
-	stop := len(dest)
+	start := dest.Len()
 
 	switch t.baseType {
 	case sqltypes.Int8:
-		dest, err = t.SQLInt8(ctx, dest, v)
+		err = t.SQLInt8(ctx, dest, v)
 	case sqltypes.Int16:
-		dest, err = t.SQLInt16(ctx, dest, v)
+		err = t.SQLInt16(ctx, dest, v)
 	case sqltypes.Int24:
-		dest, err = t.SQLInt24(ctx, dest, v)
+		err = t.SQLInt24(ctx, dest, v)
 	case sqltypes.Int32:
-		dest, err = t.SQLInt32(ctx, dest, v)
+		err = t.SQLInt32(ctx, dest, v)
 	case sqltypes.Int64:
-		dest, err = t.SQLInt64(ctx, dest, v)
+		err = t.SQLInt64(ctx, dest, v)
 	case sqltypes.Uint8:
-		dest, err = t.SQLUint8(ctx, dest, v)
+		err = t.SQLUint8(ctx, dest, v)
 	case sqltypes.Uint16:
-		dest, err = t.SQLUint16(ctx, dest, v)
+		err = t.SQLUint16(ctx, dest, v)
 	case sqltypes.Uint24:
-		dest, err = t.SQLUint24(ctx, dest, v)
+		err = t.SQLUint24(ctx, dest, v)
 	case sqltypes.Uint32:
-		dest, err = t.SQLUint32(ctx, dest, v)
+		err = t.SQLUint32(ctx, dest, v)
 	case sqltypes.Uint64:
-		dest, err = t.SQLUint64(ctx, dest, v)
+		err = t.SQLUint64(ctx, dest, v)
 	case sqltypes.Float32:
-		dest, err = t.SQLFloat32(ctx, dest, v)
+		err = t.SQLFloat32(ctx, dest, v)
 	case sqltypes.Float64:
-		dest, err = t.SQLFloat64(ctx, dest, v)
+		err = t.SQLFloat64(ctx, dest, v)
 	default:
-		return sqltypes.Value{}, sql.ErrInvalidType.New(t.baseType.String())
+		return sql.BufSQLValue{}, sql.ErrInvalidType.New(t.baseType.String())
 	}
 
 	if sql.ErrInvalidValue.Is(err) {
 		switch str := v.(type) {
 		case []byte:
-			dest = str
+			dest.Write(str)
 		case string:
-			dest = []byte(str)
+			dest.Write([]byte(str))
 		default:
-			return sqltypes.Value{}, err
+			return sql.BufSQLValue{}, err
 		}
 	} else if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 
-	val := dest[stop:]
-	return sqltypes.MakeTrusted(t.baseType, val), nil
+	return sql.BufSQLValue{Typ: t.baseType, Start: start, End: dest.Len()}, nil
 }
 
 func (t NumberTypeImpl_) Compare2(a sql.Value, b sql.Value) (int, error) {

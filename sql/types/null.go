@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"reflect"
 
 	"github.com/dolthub/vitess/go/sqltypes"
@@ -74,8 +75,8 @@ func (t nullType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t nullType) SQL(*sql.Context, []byte, interface{}) (sqltypes.Value, error) {
-	return sqltypes.NULL, nil
+func (t nullType) SQL(*sql.Context, *bytes.Buffer, interface{}) (sql.BufSQLValue, error) {
+	return sql.NullBufSQLValue, nil
 }
 
 // String implements Type interface.

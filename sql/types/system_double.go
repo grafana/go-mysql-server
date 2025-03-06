@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"reflect"
 	"strconv"
 
@@ -140,21 +141,20 @@ func (t systemDoubleType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t systemDoubleType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t systemDoubleType) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 
 	v, _, err := t.Convert(v)
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 
-	stop := len(dest)
-	dest = strconv.AppendFloat(dest, v.(float64), 'f', -1, 64)
-	val := dest[stop:]
+	start := dest.Len()
+	dest.Write(strconv.AppendFloat(dest.AvailableBuffer(), v.(float64), 'f', -1, 64))
 
-	return sqltypes.MakeTrusted(t.Type(), val), nil
+	return sql.BufSQLValue{Typ: t.Type(), Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

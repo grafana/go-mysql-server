@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"strings"
@@ -122,8 +123,8 @@ func (t TupleType) Promote() sql.Type {
 	return t
 }
 
-func (t TupleType) SQL(*sql.Context, []byte, interface{}) (sqltypes.Value, error) {
-	return sqltypes.Value{}, fmt.Errorf("unable to convert tuple type to SQL")
+func (t TupleType) SQL(*sql.Context, *bytes.Buffer, interface{}) (sql.BufSQLValue, error) {
+	return sql.BufSQLValue{}, fmt.Errorf("unable to convert tuple type to SQL")
 }
 
 func (t TupleType) String() string {

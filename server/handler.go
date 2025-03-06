@@ -15,6 +15,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	goerrors "errors"
@@ -76,6 +77,7 @@ type Handler struct {
 	maxLoggedQueryLen int
 	encodeLoggedQuery bool
 	sel               ServerEventListener
+	byteBufPool       sync.Pool
 }
 
 var _ mysql.Handler = (*Handler)(nil)
@@ -476,11 +478,9 @@ func (h *Handler) doQuery(
 	var r *sqltypes.Result
 	var processedAtLeastOneBatch bool
 
-	buf := sql.ByteBufPool.Get().(*sql.ByteBuffer)
-	defer func() {
-		buf.Reset()
-		sql.ByteBufPool.Put(buf)
-	}()
+	buf := h.getByteBuffer()
+	defer h.putByteBuffer(buf)
+	buf.Truncate(0)
 
 	// zero/single return schema use spooling shortcut
 	if types.IsOkResultSchema(schema) {
@@ -582,7 +582,7 @@ func GetDeferredProjections(iter sql.RowIter) (sql.RowIter, []sql.Expression) {
 }
 
 // resultForMax1RowIter ensures that an empty iterator returns at most one row
-func resultForMax1RowIter(ctx *sql.Context, schema sql.Schema, iter sql.RowIter, resultFields []*querypb.Field, buf *sql.ByteBuffer) (*sqltypes.Result, error) {
+func resultForMax1RowIter(ctx *sql.Context, schema sql.Schema, iter sql.RowIter, resultFields []*querypb.Field, buf *bytes.Buffer) (*sqltypes.Result, error) {
 	defer trace.StartRegion(ctx, "Handler.resultForMax1RowIter").End()
 
 	defer iter.Close(ctx)
@@ -598,19 +598,29 @@ func resultForMax1RowIter(ctx *sql.Context, schema sql.Schema, iter sql.RowIter,
 		return nil, fmt.Errorf("result max1Row iterator returned more than one row")
 	}
 
-	outputRow, err := RowToSQL(ctx, schema, row, nil, buf)
+	bufRow, err := RowToSQL(ctx, schema, row, nil, buf)
 	if err != nil {
 		return nil, err
 	}
+
+	outputRow := bufRowToValueRow(buf.Bytes(), bufRow)
 
 	ctx.GetLogger().Tracef("spooling result row %s", outputRow)
 
 	return &sqltypes.Result{Fields: resultFields, Rows: [][]sqltypes.Value{outputRow}, RowsAffected: 1}, nil
 }
 
+func bufRowToValueRow(buf []byte, row []sql.BufSQLValue) []sqltypes.Value {
+	res := make([]sqltypes.Value, len(row))
+	for i := range row {
+		res[i] = row[i].ToValue(buf)
+	}
+	return res
+}
+
 // resultForDefaultIter reads batches of rows from the iterator
 // and writes results into the callback function.
-func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema sql.Schema, iter sql.RowIter, callback func(*sqltypes.Result, bool) error, resultFields []*querypb.Field, more bool, buf *sql.ByteBuffer) (*sqltypes.Result, bool, error) {
+func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema sql.Schema, iter sql.RowIter, callback func(*sqltypes.Result, bool) error, resultFields []*querypb.Field, more bool, buf *bytes.Buffer) (*sqltypes.Result, bool, error) {
 	defer trace.StartRegion(ctx, "Handler.resultForDefaultIter").End()
 
 	eg, ctx := ctx.NewErrgroup()
@@ -679,6 +689,8 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 		return callback(r, more)
 	}
 
+	var bufRows [][]sql.BufSQLValue
+
 	// Reads rows from the channel, converts them to wire format,
 	// and calls |callback| to give them to vitess.
 	eg.Go(func() (err error) {
@@ -690,9 +702,15 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 				r = &sqltypes.Result{Fields: resultFields}
 			}
 			if r.RowsAffected == rowsBatch {
+				r.Rows = make([][]sqltypes.Value, len(bufRows))
+				for i := range bufRows {
+					r.Rows[i] = bufRowToValueRow(buf.Bytes(), bufRows[i])
+					ctx.GetLogger().Tracef("spooling result row %s", r.Rows[i])
+				}
 				if err := resetCallback(r, more); err != nil {
 					return err
 				}
+				bufRows = nil
 				r = nil
 				processedAtLeastOneBatch = true
 				continue
@@ -703,6 +721,11 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 				return context.Cause(ctx)
 			case row, ok := <-rowChan:
 				if !ok {
+					r.Rows = make([][]sqltypes.Value, len(bufRows))
+					for i := range bufRows {
+						r.Rows[i] = bufRowToValueRow(buf.Bytes(), bufRows[i])
+						ctx.GetLogger().Tracef("spooling result row %s", r.Rows[i])
+					}
 					return nil
 				}
 				if types.IsOkResult(row) {
@@ -717,9 +740,7 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 				if err != nil {
 					return err
 				}
-
-				ctx.GetLogger().Tracef("spooling result row %s", outputRow)
-				r.Rows = append(r.Rows, outputRow)
+				bufRows = append(bufRows, outputRow)
 				r.RowsAffected++
 				if !timer.Stop() {
 					<-timer.C
@@ -976,27 +997,22 @@ func updateMaxUsedConnectionsStatusVariable() {
 	}()
 }
 
-func toSqlHelper(ctx *sql.Context, typ sql.Type, buf *sql.ByteBuffer, val interface{}) (sqltypes.Value, error) {
-	if buf == nil {
-		return typ.SQL(ctx, nil, val)
-	}
-	ret, err := typ.SQL(ctx, buf.Get(), val)
-	buf.Grow(ret.Len())
-	return ret, err
+func toSqlHelper(ctx *sql.Context, typ sql.Type, buf *bytes.Buffer, val interface{}) (sql.BufSQLValue, error) {
+	return typ.SQL(ctx, buf, val)
 }
 
-func RowToSQL(ctx *sql.Context, sch sql.Schema, row sql.Row, projs []sql.Expression, buf *sql.ByteBuffer) ([]sqltypes.Value, error) {
+func RowToSQL(ctx *sql.Context, sch sql.Schema, row sql.Row, projs []sql.Expression, buf *bytes.Buffer) ([]sql.BufSQLValue, error) {
 	// need to make sure the schema is not null as some plan schema is defined as null (e.g. IfElseBlock)
 	if len(sch) == 0 {
-		return []sqltypes.Value{}, nil
+		return []sql.BufSQLValue{}, nil
 	}
 
-	outVals := make([]sqltypes.Value, len(sch))
+	outVals := make([]sql.BufSQLValue, len(sch))
 	var err error
 	if len(projs) == 0 {
 		for i, col := range sch {
 			if row[i] == nil {
-				outVals[i] = sqltypes.NULL
+				outVals[i] = sql.NullBufSQLValue
 				continue
 			}
 			outVals[i], err = toSqlHelper(ctx, col.Type, buf, row[i])
@@ -1013,7 +1029,7 @@ func RowToSQL(ctx *sql.Context, sch sql.Schema, row sql.Row, projs []sql.Express
 			return nil, err
 		}
 		if field == nil {
-			outVals[i] = sqltypes.NULL
+			outVals[i] = sql.NullBufSQLValue
 			continue
 		}
 		outVals[i], err = toSqlHelper(ctx, col.Type, buf, field)
@@ -1154,4 +1170,18 @@ func bindingsToExprs(bindings map[string]*querypb.BindVariable) (map[string]sqlp
 		res[name] = expr
 	}
 	return res, nil
+}
+
+const defaultByteBufferSz = 4096
+
+func (h *Handler) getByteBuffer() *bytes.Buffer {
+	res := h.byteBufPool.Get()
+	if res != nil {
+		return res.(*bytes.Buffer)
+	}
+	return bytes.NewBuffer(make([]byte, defaultByteBufferSz))
+}
+
+func (h *Handler) putByteBuffer(buf *bytes.Buffer) {
+	h.byteBufPool.Put(buf)
 }

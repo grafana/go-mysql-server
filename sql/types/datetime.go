@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"reflect"
@@ -371,48 +372,60 @@ func (t datetimeType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t datetimeType) SQL(_ *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t datetimeType) SQL(_ *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 
 	vt, err := ConvertToTime(v, t)
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 
 	var typ query.Type
 	var val []byte
+	start := dest.Len()
 
 	switch t.baseType {
 	case sqltypes.Date:
 		typ = sqltypes.Date
 		if vt.Equal(zeroTime) {
-			val = vt.AppendFormat(dest, ZeroDateStr)
+			dest.Grow(len(ZeroDateStr)+10)
+			val = dest.AvailableBuffer()
+			val = vt.AppendFormat(val, ZeroDateStr)
 		} else {
-			val = vt.AppendFormat(dest, sql.DateLayout)
+			dest.Grow(len(sql.DateLayout)+10)
+			val = dest.AvailableBuffer()
+			val = vt.AppendFormat(val, sql.DateLayout)
 		}
 	case sqltypes.Datetime:
 		typ = sqltypes.Datetime
 		if vt.Equal(zeroTime) {
-			val = vt.AppendFormat(dest, ZeroTimestampDatetimeStr)
+			dest.Grow(len(ZeroTimestampDatetimeStr)+10)
+			val = dest.AvailableBuffer()
+			val = vt.AppendFormat(val, ZeroTimestampDatetimeStr)
 		} else {
-			val = vt.AppendFormat(dest, sql.TimestampDatetimeLayout)
+			dest.Grow(len(sql.TimestampDatetimeLayout)+10)
+			val = dest.AvailableBuffer()
+			val = vt.AppendFormat(val, sql.TimestampDatetimeLayout)
 		}
 	case sqltypes.Timestamp:
 		typ = sqltypes.Timestamp
 		if vt.Equal(zeroTime) {
-			val = vt.AppendFormat(dest, ZeroTimestampDatetimeStr)
+			dest.Grow(len(ZeroTimestampDatetimeStr)+10)
+			val = dest.AvailableBuffer()
+			val = vt.AppendFormat(val, ZeroTimestampDatetimeStr)
 		} else {
-			val = vt.AppendFormat(dest, sql.TimestampDatetimeLayout)
+			dest.Grow(len(sql.TimestampDatetimeLayout)+10)
+			val = dest.AvailableBuffer()
+			val = vt.AppendFormat(val, sql.TimestampDatetimeLayout)
 		}
 	default:
-		return sqltypes.Value{}, sql.ErrInvalidBaseType.New(t.baseType.String(), "datetime")
+		return sql.BufSQLValue{}, sql.ErrInvalidBaseType.New(t.baseType.String(), "datetime")
 	}
 
-	valBytes := val
-
-	return sqltypes.MakeTrusted(typ, valBytes), nil
+	dest.Write(val)
+	return sql.BufSQLValue{Typ: typ, Start: start, End: dest.Len()}, nil
 }
 
 func (t datetimeType) String() string {

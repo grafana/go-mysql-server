@@ -15,6 +15,7 @@
 package jsontests
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"reflect"
@@ -98,11 +99,13 @@ func TestJsonSQL(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(fmt.Sprintf("%v", test.val), func(t *testing.T) {
-			val, err := types.JSON.SQL(sql.NewEmptyContext(), nil, test.val)
+			var buf bytes.Buffer
+			bufval, err := types.JSON.SQL(sql.NewEmptyContext(), &buf, test.val)
 			if test.expectedErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
+				val := bufval.ToValue(buf.Bytes())
 				assert.Equal(t, query.Type_JSON, val.Type())
 			}
 		})
@@ -110,8 +113,10 @@ func TestJsonSQL(t *testing.T) {
 
 	// test that nulls are null
 	t.Run(fmt.Sprintf("%v", nil), func(t *testing.T) {
-		val, err := types.JSON.SQL(sql.NewEmptyContext(), nil, nil)
+		var buf bytes.Buffer
+		bufval, err := types.JSON.SQL(sql.NewEmptyContext(), &buf, nil)
 		require.NoError(t, err)
+		val := bufval.ToValue(buf.Bytes())
 		assert.Equal(t, query.Type_NULL_TYPE, val.Type())
 	})
 }
@@ -227,8 +232,10 @@ var JsonRoundtripTests = []JsonRoundtripTest{
 func TestJsonRoundTripping(t *testing.T) {
 	for _, test := range JsonRoundtripTests {
 		t.Run("JSON roundtripping: "+test.desc, func(t *testing.T) {
-			val, err := types.JSON.SQL(sql.NewEmptyContext(), nil, test.input)
+			var buf bytes.Buffer
+			bufval, err := types.JSON.SQL(sql.NewEmptyContext(), &buf, test.input)
 			require.NoError(t, err)
+			val := bufval.ToValue(buf.Bytes())
 			assert.Equal(t, test.expected, val.ToString())
 		})
 	}

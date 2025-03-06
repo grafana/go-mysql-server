@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"reflect"
 	"strings"
 
@@ -155,19 +156,20 @@ func (t systemEnumType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t systemEnumType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t systemEnumType) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 
 	v, _, err := t.Convert(v)
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 
-	val := AppendAndSliceString(dest, v.(string))
+	start := dest.Len()
+	dest.WriteString(v.(string))
 
-	return sqltypes.MakeTrusted(t.Type(), val), nil
+	return sql.BufSQLValue{Typ: t.Type(), Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

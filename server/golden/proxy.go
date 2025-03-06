@@ -15,6 +15,7 @@
 package golden
 
 import (
+	"bytes"
 	"context"
 	dsql "database/sql"
 	"fmt"
@@ -343,6 +344,7 @@ func fetchMySqlRows(ctx *sql.Context, results *dsql.Rows, count int) (res *sqlty
 		return nil, false, err
 	}
 
+	var buf bytes.Buffer
 	rows := make([][]sqltypes.Value, 0, count)
 	for results.Next() {
 		if len(rows) == count {
@@ -361,10 +363,12 @@ func fetchMySqlRows(ctx *sql.Context, results *dsql.Rows, count int) (res *sqlty
 			if err != nil {
 				return nil, false, err
 			}
-			row[i], err = types[i].SQL(ctx, nil, scanRow[i])
+			bufval, err := types[i].SQL(ctx, &buf, scanRow[i]) 
 			if err != nil {
 				return nil, false, err
 			}
+			row[i] = bufval.ToValue(buf.Bytes())
+			buf.Reset()
 		}
 		rows = append(rows, row)
 	}

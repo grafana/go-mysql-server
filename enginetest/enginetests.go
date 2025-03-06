@@ -15,6 +15,7 @@
 package enginetest
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	dsql "database/sql"
@@ -5832,7 +5833,7 @@ func TestTypesOverWire(t *testing.T, harness ClientHarness, sessionBuilder serve
 					require.NoError(t, err)
 					expectedRowSet := script.Results[queryIdx]
 					expectedRowIdx := 0
-					buf := sql.NewByteBuffer(1000)
+					var buf bytes.Buffer
 					var engineRow sql.Row
 					for engineRow, err = engineIter.Next(ctx); err == nil; engineRow, err = engineIter.Next(ctx) {
 						if !assert.True(t, r.Next()) {
@@ -5850,11 +5851,12 @@ func TestTypesOverWire(t *testing.T, harness ClientHarness, sessionBuilder serve
 							break
 						}
 						expectedEngineRow := make([]*string, len(engineRow))
-						row, err := server.RowToSQL(ctx, sch, engineRow, nil, buf)
+						bufrow, err := server.RowToSQL(ctx, sch, engineRow, nil, &buf)
 						if !assert.NoError(t, err) {
 							break
 						}
-						for i, sqlVal := range row {
+						for i, bufVal := range bufrow {
+							sqlVal := bufVal.ToValue(buf.Bytes())
 							if !sqlVal.IsNull() {
 								str := sqlVal.ToString()
 								expectedEngineRow[i] = &str
@@ -5878,6 +5880,8 @@ func TestTypesOverWire(t *testing.T, harness ClientHarness, sessionBuilder serve
 								assert.Equal(t, expectedRow[i], *connVal)
 							}
 						}
+
+						buf.Reset()
 					}
 					assert.True(t, err == io.EOF)
 					assert.False(t, r.Next())

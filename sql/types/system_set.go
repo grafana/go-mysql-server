@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"reflect"
 
 	"github.com/dolthub/vitess/go/sqltypes"
@@ -138,22 +139,22 @@ func (t systemSetType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t systemSetType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t systemSetType) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 	convertedValue, _, err := t.Convert(v)
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 	value, err := t.BitsToString(convertedValue.(uint64))
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 
-	val := AppendAndSliceString(dest, value)
-
-	return sqltypes.MakeTrusted(t.Type(), val), nil
+	start := dest.Len()
+	dest.WriteString(value)
+	return sql.BufSQLValue{Typ: t.Type(), Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

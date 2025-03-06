@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -303,16 +304,17 @@ func (t DecimalType_) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t DecimalType_) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t DecimalType_) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 	value, err := t.ConvertToNullDecimal(v)
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
-	val := AppendAndSliceString(dest, t.DecimalValueStringFixed(value.Decimal))
-	return sqltypes.MakeTrusted(sqltypes.Decimal, val), nil
+	start := dest.Len()
+	dest.WriteString(t.DecimalValueStringFixed(value.Decimal))
+	return sql.BufSQLValue{Typ: sqltypes.Decimal, Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

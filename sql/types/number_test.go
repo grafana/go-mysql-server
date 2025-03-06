@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"reflect"
@@ -235,22 +236,27 @@ func TestNumberConvert(t *testing.T) {
 }
 
 func TestNumberSQL_BooleanFromBoolean(t *testing.T) {
-	val, err := Boolean.SQL(sql.NewEmptyContext(), nil, true)
+	var buf bytes.Buffer
+	bufval, err := Boolean.SQL(sql.NewEmptyContext(), &buf, true)
 	require.NoError(t, err)
+	val := bufval.ToValue(buf.Bytes())
 	assert.Equal(t, "INT8(1)", val.String())
-
-	val, err = Boolean.SQL(sql.NewEmptyContext(), nil, false)
+	bufval, err = Boolean.SQL(sql.NewEmptyContext(), &buf, false)
 	require.NoError(t, err)
+	val = bufval.ToValue(buf.Bytes())
 	assert.Equal(t, "INT8(0)", val.String())
 }
 
 func TestNumberSQL_NumberFromString(t *testing.T) {
-	val, err := Int64.SQL(sql.NewEmptyContext(), nil, "not a number")
+	var buf bytes.Buffer
+	bufval, err := Int64.SQL(sql.NewEmptyContext(), &buf, "not a number")
 	require.NoError(t, err)
+	val := bufval.ToValue(buf.Bytes())
 	assert.Equal(t, "not a number", val.ToString())
 
-	val, err = Float64.SQL(sql.NewEmptyContext(), nil, "also not a number")
+	bufval, err = Float64.SQL(sql.NewEmptyContext(), &buf, "also not a number")
 	require.NoError(t, err)
+	val = bufval.ToValue(buf.Bytes())
 	assert.Equal(t, "also not a number", val.ToString())
 }
 

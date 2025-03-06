@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"reflect"
@@ -197,26 +198,28 @@ func (t BitType_) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t BitType_) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t BitType_) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 	value, _, err := t.Convert(v)
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 	bitVal := value.(uint64)
 
-	var data []byte
+	dest.Grow(int(t.numOfBits/8)+1)
+	data := dest.AvailableBuffer()
+	start := dest.Len()
 	for i := uint64(0); i < uint64(t.numOfBits); i += 8 {
 		data = append(data, byte(bitVal>>i))
 	}
 	for i, j := 0, len(data)-1; i < j; i, j = i+1, j-1 {
 		data[i], data[j] = data[j], data[i]
 	}
-	val := data
+	dest.Write(data)
 
-	return sqltypes.MakeTrusted(sqltypes.Bit, val), nil
+	return sql.BufSQLValue{Typ: sqltypes.Bit, Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

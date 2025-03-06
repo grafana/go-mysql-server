@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"reflect"
 	"strconv"
 
@@ -150,21 +151,20 @@ func (t systemIntType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t systemIntType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t systemIntType) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 
 	v, _, err := t.Convert(v)
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 
-	stop := len(dest)
-	dest = strconv.AppendInt(dest, v.(int64), 10)
-	val := dest[stop:]
+	start := dest.Len()
+	dest.Write(strconv.AppendInt(dest.AvailableBuffer(), v.(int64), 10))
 
-	return sqltypes.MakeTrusted(t.Type(), val), nil
+	return sql.BufSQLValue{Typ: t.Type(), Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

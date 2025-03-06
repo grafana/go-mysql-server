@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 
@@ -125,38 +126,36 @@ func (t JsonType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t JsonType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t JsonType) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 
-	var val []byte
+	start := dest.Len()
 
 	// If we read the JSON from a table, pass through the bytes to avoid a deserialization and reserialization round-trip.
 	// This is kind of a hack, and it means that reading JSON from tables no longer matches MySQL byte-for-byte.
 	// But its worth it to avoid the round-trip, which can be very slow.
 	if j, ok := v.(JSONBytes); ok {
-		str, err := MarshallJson(j)
+		str, err := j.GetBytes()
 		if err != nil {
-			return sqltypes.NULL, err
+			return sql.BufSQLValue{}, err
 		}
-		val = str
+		dest.Write(str)
 	} else {
 		// Convert to jsonType
 		jsVal, _, err := t.Convert(v)
 		if err != nil {
-			return sqltypes.NULL, err
+			return sql.BufSQLValue{}, err
 		}
 		js := jsVal.(sql.JSONWrapper)
-
-		str, err := StringifyJSON(js)
+		err = WriteJSONTo(js, dest)
 		if err != nil {
-			return sqltypes.NULL, err
+			return sql.BufSQLValue{}, err
 		}
-		val = AppendAndSliceString(dest, str)
 	}
 
-	return sqltypes.MakeTrusted(sqltypes.TypeJSON, val), nil
+	return sql.BufSQLValue{Typ: sqltypes.TypeJSON, Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

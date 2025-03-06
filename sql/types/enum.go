@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -234,13 +235,13 @@ func (t EnumType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t EnumType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t EnumType) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 	convertedValue, _, err := t.Convert(v)
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 	value, _ := t.At(int(convertedValue.(uint16)))
 
@@ -255,11 +256,12 @@ func (t EnumType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Va
 			snippet = snippet[:50]
 		}
 		snippet = strings.ToValidUTF8(snippet, string(utf8.RuneError))
-		return sqltypes.Value{}, sql.ErrCharSetFailedToEncode.New(resultCharset.Name(), utf8.ValidString(value), snippet)
+		return sql.BufSQLValue{}, sql.ErrCharSetFailedToEncode.New(resultCharset.Name(), utf8.ValidString(value), snippet)
 	}
-	val := encodedBytes
-
-	return sqltypes.MakeTrusted(sqltypes.Enum, val), nil
+	start := dest.Len()
+	// TODO: Encoder into bytes.Buffer
+	dest.Write(encodedBytes)
+	return sql.BufSQLValue{Typ: sqltypes.Enum, Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

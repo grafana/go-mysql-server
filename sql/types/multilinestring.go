@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"math"
 	"reflect"
 
@@ -95,19 +96,21 @@ func (t MultiLineStringType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t MultiLineStringType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t MultiLineStringType) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 
 	v, _, err := t.Convert(v)
 	if err != nil {
-		return sqltypes.Value{}, nil
+		return sql.BufSQLValue{}, nil
 	}
 
+	// TODO: Serialize into dest
 	buf := v.(MultiLineString).Serialize()
-
-	return sqltypes.MakeTrusted(sqltypes.Geometry, buf), nil
+	start := dest.Len()
+	dest.Write(buf)
+	return sql.BufSQLValue{Typ: sqltypes.Geometry, Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

@@ -15,6 +15,7 @@
 package sql
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"time"
@@ -90,7 +91,7 @@ type Type interface {
 	// SQL returns the sqltypes.Value for the given value.
 	// Implementations can optionally use |dest| to append
 	// serialized data, but should not mutate existing data.
-	SQL(ctx *Context, dest []byte, v interface{}) (sqltypes.Value, error)
+	SQL(ctx *Context, dest *bytes.Buffer, v interface{}) (BufSQLValue, error)
 	// Type returns the query.Type for the given Type.
 	Type() query.Type
 	// ValueType returns the Go type of the value returned by Convert().
@@ -99,6 +100,21 @@ type Type interface {
 	Zero() interface{}
 	fmt.Stringer
 }
+
+// A sqltypes.Value that was constructed against a bytes.Buffer or a
+// []byte, but has not yet taken a reference on it. Converted to a
+// sqltypes.Value with |ToValue([]byte)|.
+type BufSQLValue struct {
+	Typ   query.Type
+	Start int
+	End   int
+}
+
+func (v BufSQLValue) ToValue(b []byte) sqltypes.Value {
+	return sqltypes.MakeTrusted(v.Typ, b[v.Start:v.End])
+}
+
+var NullBufSQLValue BufSQLValue
 
 // NullType represents the type of NULL values
 type NullType interface {

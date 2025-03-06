@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"math"
 	"reflect"
 	"strconv"
@@ -262,17 +263,19 @@ func (t TimespanType_) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t TimespanType_) SQL(_ *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t TimespanType_) SQL(_ *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 	ti, err := t.ConvertToTimespan(v)
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 
+	start := dest.Len()
 	val := ti.Bytes()
-	return sqltypes.MakeTrusted(sqltypes.Time, val), nil
+	dest.Write(val)
+	return sql.BufSQLValue{Typ: sqltypes.Time, Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.

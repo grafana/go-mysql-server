@@ -15,6 +15,7 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"math/bits"
@@ -220,23 +221,24 @@ func (t SetType) Promote() sql.Type {
 }
 
 // SQL implements Type interface.
-func (t SetType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Value, error) {
+func (t SetType) SQL(ctx *sql.Context, dest *bytes.Buffer, v interface{}) (sql.BufSQLValue, error) {
 	if v == nil {
-		return sqltypes.NULL, nil
+		return sql.NullBufSQLValue, nil
 	}
 	convertedValue, _, err := t.Convert(v)
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 	value, err := t.BitsToString(convertedValue.(uint64))
 	if err != nil {
-		return sqltypes.Value{}, err
+		return sql.BufSQLValue{}, err
 	}
 
 	resultCharset := ctx.GetCharacterSetResults()
 	if resultCharset == sql.CharacterSet_Unspecified || resultCharset == sql.CharacterSet_binary {
 		resultCharset = t.collation.CharacterSet()
 	}
+	// TODO: Encode into |dest|. Less allocations...
 	encodedBytes, ok := resultCharset.Encoder().Encode(encodings.StringToBytes(value))
 	if !ok {
 		snippet := value
@@ -244,11 +246,13 @@ func (t SetType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Val
 			snippet = snippet[:50]
 		}
 		snippet = strings.ToValidUTF8(snippet, string(utf8.RuneError))
-		return sqltypes.Value{}, sql.ErrCharSetFailedToEncode.New(resultCharset.Name(), utf8.ValidString(value), snippet)
+		return sql.BufSQLValue{}, sql.ErrCharSetFailedToEncode.New(resultCharset.Name(), utf8.ValidString(value), snippet)
 	}
-	val := encodedBytes
 
-	return sqltypes.MakeTrusted(sqltypes.Set, val), nil
+	start := dest.Len()
+	val := encodedBytes
+	dest.Write(val)
+	return sql.BufSQLValue{Typ: sqltypes.Set, Start: start, End: dest.Len()}, nil
 }
 
 // String implements Type interface.
