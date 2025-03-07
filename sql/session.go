@@ -207,13 +207,15 @@ type TransactionSession interface {
 	ReleaseSavepoint(ctx *Context, transaction Transaction, name string) error
 }
 
+type SessionOption func()
+
 // A LifecycleAwareSession is a a sql.Session that gets lifecycle callbacks
 // from the handler when it begins and ends a command and when it itself ends.
 //
 // This is an optional interface which integrators can choose to implement
 // if they want those callbacks.
 type LifecycleAwareSession interface {
-	CommandBegin() error
+	CommandBegin(ctx context.CancelFunc) error
 	CommandEnd()
 	SessionEnd()
 }
@@ -719,9 +721,9 @@ const (
 )
 
 // Helper function to call CommandBegin on a LifecycleAwareSession, or do nothing.
-func SessionCommandBegin(s Session) error {
+func SessionCommandBegin(s Session, cancel context.CancelFunc) error {
 	if cur, ok := s.(LifecycleAwareSession); ok {
-		return cur.CommandBegin()
+		return cur.CommandBegin(cancel)
 	}
 	return nil
 }
