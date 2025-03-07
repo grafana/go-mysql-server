@@ -478,18 +478,20 @@ func (h *Handler) doQuery(
 	var r *sqltypes.Result
 	var processedAtLeastOneBatch bool
 
-	buf := h.getByteBuffer()
-	defer h.putByteBuffer(buf)
-	buf.Truncate(0)
-
 	// zero/single return schema use spooling shortcut
 	if types.IsOkResultSchema(schema) {
 		r, err = resultForOkIter(sqlCtx, rowIter)
 	} else if schema == nil {
 		r, err = resultForEmptyIter(sqlCtx, rowIter, resultFields)
 	} else if analyzer.FlagIsSet(qFlags, sql.QFlagMax1Row) {
+		buf := h.getByteBuffer()
+		defer h.putByteBuffer(buf)
+		buf.Reset()
 		r, err = resultForMax1RowIter(sqlCtx, schema, rowIter, resultFields, buf)
 	} else {
+		buf := h.getByteBuffer()
+		defer h.putByteBuffer(buf)
+		buf.Reset()
 		r, processedAtLeastOneBatch, err = h.resultForDefaultIter(sqlCtx, c, schema, rowIter, callback, resultFields, more, buf)
 	}
 	if err != nil {
@@ -603,19 +605,38 @@ func resultForMax1RowIter(ctx *sql.Context, schema sql.Schema, iter sql.RowIter,
 		return nil, err
 	}
 
-	outputRow := bufRowToValueRow(buf.Bytes(), bufRow)
+	outputRow := bufRowToValueRow(bufRow, buf.Bytes())
 
 	ctx.GetLogger().Tracef("spooling result row %s", outputRow)
 
 	return &sqltypes.Result{Fields: resultFields, Rows: [][]sqltypes.Value{outputRow}, RowsAffected: 1}, nil
 }
 
-func bufRowToValueRow(buf []byte, row []sql.BufSQLValue) []sqltypes.Value {
-	res := make([]sqltypes.Value, len(row))
-	for i := range row {
-		res[i] = row[i].ToValue(buf)
+func bufRowsToValueRows(bufRows [][]sql.BufSQLValue, buf []byte) [][]sqltypes.Value {
+	if len(bufRows) == 0 {
+		return [][]sqltypes.Value{}
+	}
+	res := make([][]sqltypes.Value, len(bufRows))
+	rowSz := len(bufRows[0])
+	rows := make([]sqltypes.Value, rowSz*len(res))
+	for i := range res {
+		row := rows[(i*rowSz):((i+1)*rowSz)]
+		bufRowIntoValueRow(row, bufRows[i], buf)
+		res[i] = row
 	}
 	return res
+}
+
+func bufRowToValueRow(row []sql.BufSQLValue, buf []byte) []sqltypes.Value {
+	res := make([]sqltypes.Value, len(row))
+	bufRowIntoValueRow(res, row, buf)
+	return res
+}
+
+func bufRowIntoValueRow(vals []sqltypes.Value, row []sql.BufSQLValue, buf []byte) {
+	for i := range row {
+		vals[i] = row[i].ToValue(buf)
+	}
 }
 
 // resultForDefaultIter reads batches of rows from the iterator
@@ -702,15 +723,14 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 				r = &sqltypes.Result{Fields: resultFields}
 			}
 			if r.RowsAffected == rowsBatch {
-				r.Rows = make([][]sqltypes.Value, len(bufRows))
-				for i := range bufRows {
-					r.Rows[i] = bufRowToValueRow(buf.Bytes(), bufRows[i])
+				r.Rows = bufRowsToValueRows(bufRows, buf.Bytes())
+				for i := range r.Rows {
 					ctx.GetLogger().Tracef("spooling result row %s", r.Rows[i])
 				}
 				if err := resetCallback(r, more); err != nil {
 					return err
 				}
-				bufRows = nil
+				bufRows = bufRows[:0]
 				r = nil
 				processedAtLeastOneBatch = true
 				continue
@@ -721,26 +741,42 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 				return context.Cause(ctx)
 			case row, ok := <-rowChan:
 				if !ok {
-					r.Rows = make([][]sqltypes.Value, len(bufRows))
-					for i := range bufRows {
-						r.Rows[i] = bufRowToValueRow(buf.Bytes(), bufRows[i])
+					r.Rows = bufRowsToValueRows(bufRows, buf.Bytes())
+					for i := range r.Rows {
 						ctx.GetLogger().Tracef("spooling result row %s", r.Rows[i])
 					}
 					return nil
 				}
 				if types.IsOkResult(row) {
-					if len(r.Rows) > 0 {
+					if len(bufRows) > 0 {
 						panic("Got OkResult mixed with RowResult")
 					}
 					r = resultFromOkResult(row[0].(types.OkResult))
 					continue
 				}
 
-				outputRow, err := RowToSQL(ctx, schema, row, projs, buf)
+				var outputRow []sql.BufSQLValue
+				var newRow bool
+				if cap(bufRows) > len(bufRows) {
+					bufRows = bufRows[:len(bufRows)+1]
+					if cap(bufRows[len(bufRows)-1]) >= len(schema) {
+						bufRows[len(bufRows)-1] = bufRows[len(bufRows)-1][:len(schema)]
+					} else {
+						bufRows[len(bufRows)-1] = make([]sql.BufSQLValue, len(schema))
+					}
+				} else {
+					bufRows = append(bufRows, make([]sql.BufSQLValue, len(schema)))
+					newRow = true
+				}
+				outputRow = bufRows[len(bufRows)-1]
+				if len(outputRow) != len(schema) {
+					panic(fmt.Sprintf("schema and outputRow mismatch: len(outputRow): %v, len(schema): %v, len(bufRows): %v, cap(bufRows): %v, newRow: %v\nbufRows: %v",
+						len(outputRow), len(schema), len(bufRows), cap(bufRows), newRow, bufRows))
+				}
+				err := rowIntoSQLRow(ctx, outputRow, schema, row, projs, buf)
 				if err != nil {
 					return err
 				}
-				bufRows = append(bufRows, outputRow)
 				r.RowsAffected++
 				if !timer.Stop() {
 					<-timer.C
@@ -1008,6 +1044,14 @@ func RowToSQL(ctx *sql.Context, sch sql.Schema, row sql.Row, projs []sql.Express
 	}
 
 	outVals := make([]sql.BufSQLValue, len(sch))
+	err := rowIntoSQLRow(ctx, outVals, sch, row, projs, buf)
+	if err != nil {
+		return nil, err
+	}
+	return outVals, nil
+}
+
+func rowIntoSQLRow(ctx *sql.Context, outVals []sql.BufSQLValue, sch sql.Schema, row sql.Row, projs []sql.Expression, buf *bytes.Buffer) error {
 	var err error
 	if len(projs) == 0 {
 		for i, col := range sch {
@@ -1017,16 +1061,16 @@ func RowToSQL(ctx *sql.Context, sch sql.Schema, row sql.Row, projs []sql.Express
 			}
 			outVals[i], err = toSqlHelper(ctx, col.Type, buf, row[i])
 			if err != nil {
-				return nil, err
+				return err
 			}
 		}
-		return outVals, nil
+		return nil
 	}
 
 	for i, col := range sch {
 		field, err := projs[i].Eval(ctx, row)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if field == nil {
 			outVals[i] = sql.NullBufSQLValue
@@ -1034,10 +1078,10 @@ func RowToSQL(ctx *sql.Context, sch sql.Schema, row sql.Row, projs []sql.Express
 		}
 		outVals[i], err = toSqlHelper(ctx, col.Type, buf, field)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return outVals, nil
+	return nil
 }
 
 func schemaToFields(ctx *sql.Context, s sql.Schema) []*querypb.Field {
