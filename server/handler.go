@@ -78,6 +78,7 @@ type Handler struct {
 	encodeLoggedQuery bool
 	sel               ServerEventListener
 	byteBufPool       sync.Pool
+	bufRowsPool       sync.Pool
 }
 
 var _ mysql.Handler = (*Handler)(nil)
@@ -612,16 +613,16 @@ func resultForMax1RowIter(ctx *sql.Context, schema sql.Schema, iter sql.RowIter,
 	return &sqltypes.Result{Fields: resultFields, Rows: [][]sqltypes.Value{outputRow}, RowsAffected: 1}, nil
 }
 
-func bufRowsToValueRows(bufRows [][]sql.BufSQLValue, buf []byte) [][]sqltypes.Value {
+func bufRowsToValueRows(bufRows []sql.BufSQLValue, buf []byte, rowsSz, sz int) [][]sqltypes.Value {
 	if len(bufRows) == 0 {
 		return [][]sqltypes.Value{}
 	}
-	res := make([][]sqltypes.Value, len(bufRows))
-	rowSz := len(bufRows[0])
-	rows := make([]sqltypes.Value, rowSz*len(res))
+	res := make([][]sqltypes.Value, rowsSz)
+	values := make([]sqltypes.Value, len(bufRows))
 	for i := range res {
-		row := rows[(i*rowSz):((i+1)*rowSz)]
-		bufRowIntoValueRow(row, bufRows[i], buf)
+		start, end := i*sz, (i+1)*sz
+		row := values[start:end]
+		bufRowIntoValueRow(row, bufRows[start:end], buf)
 		res[i] = row
 	}
 	return res
@@ -710,7 +711,8 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 		return callback(r, more)
 	}
 
-	var bufRows [][]sql.BufSQLValue
+	bufRows := h.getBufRows()
+	defer h.putBufRows(bufRows)
 
 	// Reads rows from the channel, converts them to wire format,
 	// and calls |callback| to give them to vitess.
@@ -723,7 +725,7 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 				r = &sqltypes.Result{Fields: resultFields}
 			}
 			if r.RowsAffected == rowsBatch {
-				r.Rows = bufRowsToValueRows(bufRows, buf.Bytes())
+				r.Rows = bufRowsToValueRows(bufRows, buf.Bytes(), int(r.RowsAffected), len(schema))
 				for i := range r.Rows {
 					ctx.GetLogger().Tracef("spooling result row %s", r.Rows[i])
 				}
@@ -741,7 +743,7 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 				return context.Cause(ctx)
 			case row, ok := <-rowChan:
 				if !ok {
-					r.Rows = bufRowsToValueRows(bufRows, buf.Bytes())
+					r.Rows = bufRowsToValueRows(bufRows, buf.Bytes(), int(r.RowsAffected), len(schema))
 					for i := range r.Rows {
 						ctx.GetLogger().Tracef("spooling result row %s", r.Rows[i])
 					}
@@ -755,24 +757,8 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 					continue
 				}
 
-				var outputRow []sql.BufSQLValue
-				var newRow bool
-				if cap(bufRows) > len(bufRows) {
-					bufRows = bufRows[:len(bufRows)+1]
-					if cap(bufRows[len(bufRows)-1]) >= len(schema) {
-						bufRows[len(bufRows)-1] = bufRows[len(bufRows)-1][:len(schema)]
-					} else {
-						bufRows[len(bufRows)-1] = make([]sql.BufSQLValue, len(schema))
-					}
-				} else {
-					bufRows = append(bufRows, make([]sql.BufSQLValue, len(schema)))
-					newRow = true
-				}
-				outputRow = bufRows[len(bufRows)-1]
-				if len(outputRow) != len(schema) {
-					panic(fmt.Sprintf("schema and outputRow mismatch: len(outputRow): %v, len(schema): %v, len(bufRows): %v, cap(bufRows): %v, newRow: %v\nbufRows: %v",
-						len(outputRow), len(schema), len(bufRows), cap(bufRows), newRow, bufRows))
-				}
+				bufRows = growBufRows(bufRows, len(schema))
+				outputRow := bufRows[len(bufRows)-len(schema):]
 				err := rowIntoSQLRow(ctx, outputRow, schema, row, projs, buf)
 				if err != nil {
 					return err
@@ -1037,6 +1023,15 @@ func toSqlHelper(ctx *sql.Context, typ sql.Type, buf *bytes.Buffer, val interfac
 	return typ.SQL(ctx, buf, val)
 }
 
+func growBufRows(rows []sql.BufSQLValue, sz int) []sql.BufSQLValue {
+	if cap(rows) >= len(rows)+sz {
+		return rows[:len(rows)+sz]
+	}
+	res := make([]sql.BufSQLValue, len(rows)+sz, (cap(rows)+sz)*2)
+	copy(res[:], rows[:])
+	return res
+}
+
 func RowToSQL(ctx *sql.Context, sch sql.Schema, row sql.Row, projs []sql.Expression, buf *bytes.Buffer) ([]sql.BufSQLValue, error) {
 	// need to make sure the schema is not null as some plan schema is defined as null (e.g. IfElseBlock)
 	if len(sch) == 0 {
@@ -1228,4 +1223,16 @@ func (h *Handler) getByteBuffer() *bytes.Buffer {
 
 func (h *Handler) putByteBuffer(buf *bytes.Buffer) {
 	h.byteBufPool.Put(buf)
+}
+
+func (h *Handler) getBufRows() []sql.BufSQLValue {
+	res := h.bufRowsPool.Get()
+	if res != nil {
+		return res.([]sql.BufSQLValue)
+	}
+	return []sql.BufSQLValue{}
+}
+
+func (h *Handler) putBufRows(rows []sql.BufSQLValue) {
+	h.bufRowsPool.Put(rows)
 }
