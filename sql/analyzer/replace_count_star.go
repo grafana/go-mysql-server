@@ -98,9 +98,11 @@ func replaceCountStar(ctx *sql.Context, a *Analyzer, n sql.Node, _ *plan.Scope, 
 				if statsTable, ok := rt.Table.(sql.StatisticsTable); ok {
 					rowCnt, exact, err := statsTable.RowCount(ctx)
 					if err == nil && exact {
+						a := expression.NewAlias(name, expression.NewGetFieldWithTable(int(cnt.Id()), 0, types.Int64, rt.Database().Name(), statsTable.Name(), name, false))
+						a.SetId(cnt.Id())
 						return plan.NewProject(
 							[]sql.Expression{
-								expression.NewAlias(name, expression.NewGetFieldWithTable(int(cnt.Id()), 0, types.Int64, rt.Database().Name(), statsTable.Name(), name, false)).WithId(cnt.Id()),
+								a,
 							},
 							plan.NewTableCount(name, rt.SqlDatabase, statsTable, rowCnt, cnt.Id()),
 						), transform.NewTree, nil

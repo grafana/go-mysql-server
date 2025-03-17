@@ -48,7 +48,7 @@ type planErrTest struct {
 
 func TestPlanBuilder(t *testing.T) {
 	var verbose, rewrite bool
-	//verbose = true
+	verbose = true
 	//rewrite = true
 
 	var tests = []planTest{
@@ -117,6 +117,35 @@ Project
                  ├─ columns: [x y z]
                  ├─ colSet: (1-3)
                  └─ tableId: 1
+`,
+		},
+		{
+			Query: `select 
+    CAST(JSON_EXTRACT(rs.s, '$.a.b.c') AS FLOAT)+1 as s1,
+    CAST(JSON_EXTRACT(rs.s, '$.a.b.c') AS FLOAT)+2 as s2,
+    CAST(JSON_EXTRACT(rs.s, '$.a.b.c') AS FLOAT)+3 as s3
+from rs
+`,
+			ExpectedPlan: ``,
+		},
+		{
+			Query: `select 
+    COUNT(DISTINCT rs.t) as total,
+    AVG(CAST(JSON_EXTRACT(rs.s, '$.a.b.c') AS FLOAT)) as s_avg,
+    MIN(CAST(JSON_EXTRACT(rs.s, '$.a.b.c') AS FLOAT)) as s_min,
+    MAX(CAST(JSON_EXTRACT(rs.s, '$.a.b.c') AS FLOAT)) as s_max,
+    COUNT(CASE WHEN CAST(JSON_EXTRACT(rs.s, '$.a.b.c') AS FLOAT) < 3.0 THEN 1 END) as s3
+from rs group by total
+`,
+			ExpectedPlan: `
+Project
+ ├─ columns: [abs(xy.y:2!null)->a:4]
+ └─ Sort(abs(xy.y:2!null) ASC nullsFirst)
+     └─ Table
+         ├─ name: xy
+         ├─ columns: [x y z]
+         ├─ colSet: (1-3)
+         └─ tableId: 1
 `,
 		},
 		{
@@ -2661,9 +2690,15 @@ func newTestCatalog(db *memory.Database) *sql.MapCatalog {
 		{Name: "v", Type: types.Int64},
 		{Name: "w", Type: types.Int64},
 	}, 0), nil)
+	cat.Tables["rs"] = memory.NewTable(db, "rs", sql.NewPrimaryKeySchema(sql.Schema{
+		{Name: "r", Type: types.Int64},
+		{Name: "s", Type: types.JSON},
+		{Name: "t", Type: types.Text},
+	}, 0), nil)
 
 	db.AddTable("xy", cat.Tables["xy"].(memory.MemTable))
 	db.AddTable("uv", cat.Tables["uv"].(memory.MemTable))
+	db.AddTable("rs", cat.Tables["rs"].(memory.MemTable))
 	cat.Databases["mydb"] = db
 	cat.Funcs = function.NewRegistry()
 	return cat

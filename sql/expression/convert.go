@@ -75,10 +75,12 @@ type Convert struct {
 	// must be created with their specific scale and precision values, unlike other types, we cache the created
 	// type to avoid re-creating it on every call to Type().
 	cachedDecimalType sql.DecimalType
+	id                sql.ColumnId
 }
 
 var _ sql.Expression = (*Convert)(nil)
 var _ sql.CollationCoercible = (*Convert)(nil)
+var _ sql.IdExpression = (*Convert)(nil)
 
 // NewConvert creates a new Convert expression that will attempt to convert the specified expression |expr| into the
 // |castToType| type. All optional parameters (i.e. typeLength, typeScale, and charset) are omitted and initialized
@@ -133,6 +135,14 @@ func GetConvertToType(l, r sql.Type) string {
 	}
 
 	return ConvertToChar
+}
+
+func (c *Convert) Id() sql.ColumnId {
+	return c.id
+}
+
+func (c *Convert) SetId(id sql.ColumnId) {
+	c.id = id
 }
 
 // IsNullable implements the Expression interface.
@@ -212,6 +222,9 @@ func (c *Convert) CollationCoercibility(ctx *sql.Context) (collation sql.Collati
 
 // String implements the Stringer interface.
 func (c *Convert) String() string {
+	if c.id > 0 {
+		return sql.DebugString(NewGetField(int(c.id), c.Type(), "", true))
+	}
 	extraTypeInfo := ""
 	if c.typeLength > 0 {
 		if c.typeScale > 0 {
@@ -220,29 +233,29 @@ func (c *Convert) String() string {
 			extraTypeInfo = fmt.Sprintf("(%d)", c.typeLength)
 		}
 	}
+	if c.id > 0 {
+		return fmt.Sprintf("convert(%d, %v%s)", c.id, c.castToType, extraTypeInfo)
+	}
 	return fmt.Sprintf("convert(%v, %v%s)", c.Child, c.castToType, extraTypeInfo)
 }
 
 // DebugString implements the Expression interface.
 func (c *Convert) DebugString() string {
-	pr := sql.NewTreePrinter()
-	_ = pr.WriteNode("convert")
-	children := []string{
-		fmt.Sprintf("type: %v", c.castToType),
+	if c.id > 0 {
+		return sql.DebugString(NewGetField(int(c.id), c.Type(), "", true))
 	}
-
+	extraTypeInfo := ""
 	if c.typeLength > 0 {
-		children = append(children, fmt.Sprintf("typeLength: %v", c.typeLength))
+		if c.typeScale > 0 {
+			extraTypeInfo = fmt.Sprintf("(%d,%d)", c.typeLength, c.typeScale)
+		} else {
+			extraTypeInfo = fmt.Sprintf("(%d)", c.typeLength)
+		}
 	}
-
-	if c.typeScale > 0 {
-		children = append(children, fmt.Sprintf("typeScale: %v", c.typeScale))
+	if c.id > 0 {
+		return fmt.Sprintf("convert(%d, %v%s)", c.id, c.castToType, extraTypeInfo)
 	}
-
-	children = append(children, fmt.Sprintf(sql.DebugString(c.Child)))
-
-	_ = pr.WriteChildren(children...)
-	return pr.String()
+	return fmt.Sprintf("convert(%v, %v%s)", sql.DebugString(c.Child), c.castToType, extraTypeInfo)
 }
 
 // WithChildren implements the Expression interface.

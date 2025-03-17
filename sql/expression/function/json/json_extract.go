@@ -29,6 +29,7 @@ import (
 type JSONExtract struct {
 	JSON  sql.Expression
 	Paths []sql.Expression
+	id    sql.ColumnId
 }
 
 var _ sql.FunctionExpression = (*JSONExtract)(nil)
@@ -40,7 +41,7 @@ func NewJSONExtract(args ...sql.Expression) (sql.Expression, error) {
 		return nil, sql.ErrInvalidArgumentNumber.New("JSON_EXTRACT", 2, len(args))
 	}
 
-	return &JSONExtract{args[0], args[1:]}, nil
+	return &JSONExtract{JSON: args[0], Paths: args[1:]}, nil
 }
 
 // FunctionName implements sql.FunctionExpression
@@ -140,6 +141,15 @@ func (j *JSONExtract) String() string {
 	var parts = make([]string, len(children))
 	for i, c := range children {
 		parts[i] = c.String()
+	}
+	return fmt.Sprintf("json_extract(%s)", strings.Join(parts, ", "))
+}
+
+func (j *JSONExtract) DebugString() string {
+	children := j.Children()
+	var parts = make([]string, len(children))
+	for i, c := range children {
+		parts[i] = sql.DebugString(c)
 	}
 	return fmt.Sprintf("json_extract(%s)", strings.Join(parts, ", "))
 }

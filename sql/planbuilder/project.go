@@ -15,6 +15,7 @@
 package planbuilder
 
 import (
+	"strconv"
 	"strings"
 
 	ast "github.com/dolthub/vitess/go/vt/sqlparser"
@@ -27,6 +28,34 @@ import (
 
 func (b *Builder) analyzeProjectionList(inScope, outScope *scope, selectExprs ast.SelectExprs) {
 	b.analyzeSelectList(inScope, outScope, selectExprs)
+
+	var i int
+	for h, cnt := range b.intern.uses {
+		if cnt > 1 {
+			switch e := b.intern.hashToExpr[h].(type) {
+			case *expression.GetField, *expression.Alias:
+			case sql.IdExpression:
+				// expr used repeatedly
+				// add alias to expr
+				// replace expr uses with getfield reference
+				copyE, _ := e.WithChildren(e.Children()...)
+				name := "%synth_" + strconv.Itoa(i)
+				a := expression.NewAlias(name, copyE)
+				id := outScope.newColumn(scopeColumn{
+					db:        "",
+					table:     "",
+					col:       name,
+					typ:       a.Type(),
+					scalar:    a,
+					synthetic: true,
+				})
+				b.intern.colIdToExpr[id] = e
+				a.SetId(sql.ColumnId(id))
+				e.SetId(sql.ColumnId(id))
+			default:
+			}
+		}
+	}
 }
 
 func (b *Builder) analyzeSelectList(inScope, outScope *scope, selectExprs ast.SelectExprs) {
@@ -146,7 +175,7 @@ func (b *Builder) analyzeSelectList(inScope, outScope *scope, selectExprs ast.Se
 			} else {
 				id := outScope.newColumn(col)
 				col.id = id
-				e = e.WithId(sql.ColumnId(id)).(*expression.Alias)
+				e.SetId(sql.ColumnId(id))
 				outScope.cols[len(outScope.cols)-1].scalar = e
 				col.scalar = e
 				tempScope.addColumn(col)
@@ -207,9 +236,12 @@ func (b *Builder) markDeferProjection(proj sql.Node, inScope, outScope *scope) {
 }
 
 func (b *Builder) buildProjection(inScope, outScope *scope) {
-	projections := make([]sql.Expression, len(outScope.cols))
-	for i, sc := range outScope.cols {
-		projections[i] = sc.scalar
+	var projections []sql.Expression
+	for _, sc := range outScope.cols {
+		if sc.synthetic {
+			continue
+		}
+		projections = append(projections, sc.scalarGf())
 	}
 	proj, err := b.f.buildProject(plan.NewProject(projections, inScope.node), outScope.refsSubquery)
 	if err != nil {

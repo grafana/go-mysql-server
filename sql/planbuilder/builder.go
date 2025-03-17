@@ -38,7 +38,6 @@ type Builder struct {
 	parserOpts      ast.ParserOptions
 	f               *factory
 	currentDatabase sql.Database
-	colId           columnId
 	tabId           sql.TableId
 	multiDDL        bool
 	viewCtx         *ViewContext
@@ -54,6 +53,7 @@ type Builder struct {
 	qFlags         *sql.QueryFlags
 	authEnabled    bool
 	authQueryState sql.AuthorizationQueryState
+	intern         *interner
 }
 
 // BindvarContext holds bind variable replacement literals.
@@ -127,6 +127,7 @@ func New(ctx *sql.Context, cat sql.Catalog, es sql.EventScheduler, p sql.Parser)
 		qFlags:         &sql.QueryFlags{},
 		authEnabled:    true,
 		authQueryState: state,
+		intern:         newInterner(),
 	}
 }
 
@@ -186,7 +187,7 @@ func (b *Builder) newScope() *scope {
 }
 
 func (b *Builder) Reset() {
-	b.colId = 0
+	b.intern.colId = 0
 	b.tabId = 0
 	b.bindCtx = nil
 	b.currentDatabase = nil

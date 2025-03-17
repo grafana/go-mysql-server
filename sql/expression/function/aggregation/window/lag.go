@@ -70,10 +70,10 @@ func (l *Lag) Id() sql.ColumnId {
 }
 
 // WithId implements the Aggregation interface
-func (l *Lag) WithId(id sql.ColumnId) sql.IdExpression {
+func (l *Lag) SetId(id sql.ColumnId) {
 	ret := *l
 	ret.id = id
-	return &ret
+	return
 }
 
 // Description implements sql.FunctionExpression

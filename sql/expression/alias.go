@@ -24,11 +24,13 @@ import (
 // AliasReference is a named reference to an aliased expression.
 type AliasReference struct {
 	name string
+	id   sql.ColumnId
+	ref  sql.Expression
 }
 
 // NewAliasReference creates a new AliasReference from the specified alias name.
-func NewAliasReference(name string) *AliasReference {
-	return &AliasReference{name}
+func NewAliasReference(name string, id sql.ColumnId, ref sql.Expression) *AliasReference {
+	return &AliasReference{name: name, id: id, ref: ref}
 }
 
 func (a AliasReference) Name() string {
@@ -72,7 +74,7 @@ func (a AliasReference) WithChildren(children ...sql.Expression) (sql.Expression
 	if len(children) != 0 {
 		return nil, sql.ErrInvalidChildrenNumber.New(a, len(children), 0)
 	}
-	return NewAliasReference(a.name), nil
+	return NewAliasReference(a.name, a.id, a.ref), nil
 }
 
 var _ sql.Expression = (*AliasReference)(nil)
@@ -106,10 +108,8 @@ func (e *Alias) Unreferencable() bool {
 	return e.unreferencable
 }
 
-func (e *Alias) WithId(id sql.ColumnId) sql.IdExpression {
-	ret := *e
-	ret.id = id
-	return &ret
+func (e *Alias) SetId(id sql.ColumnId) {
+	e.id = id
 }
 
 func (e *Alias) Id() sql.ColumnId {

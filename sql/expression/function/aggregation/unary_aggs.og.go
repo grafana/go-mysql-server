@@ -69,9 +69,9 @@ func (a *AnyValue) WithChildren(children ...sql.Expression) (sql.Expression, err
 	return &AnyValue{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *AnyValue) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &AnyValue{unaryAggBase: *res.(*unaryAggBase)}
+func (a *AnyValue) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *AnyValue) NewBuffer() (sql.AggregationBuffer, error) {
@@ -148,9 +148,9 @@ func (a *Avg) WithChildren(children ...sql.Expression) (sql.Expression, error) {
 	return &Avg{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *Avg) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &Avg{unaryAggBase: *res.(*unaryAggBase)}
+func (a *Avg) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *Avg) NewBuffer() (sql.AggregationBuffer, error) {
@@ -227,9 +227,9 @@ func (a *BitAnd) WithChildren(children ...sql.Expression) (sql.Expression, error
 	return &BitAnd{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *BitAnd) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &BitAnd{unaryAggBase: *res.(*unaryAggBase)}
+func (a *BitAnd) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *BitAnd) NewBuffer() (sql.AggregationBuffer, error) {
@@ -306,9 +306,9 @@ func (a *BitOr) WithChildren(children ...sql.Expression) (sql.Expression, error)
 	return &BitOr{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *BitOr) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &BitOr{unaryAggBase: *res.(*unaryAggBase)}
+func (a *BitOr) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *BitOr) NewBuffer() (sql.AggregationBuffer, error) {
@@ -385,9 +385,9 @@ func (a *BitXor) WithChildren(children ...sql.Expression) (sql.Expression, error
 	return &BitXor{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *BitXor) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &BitXor{unaryAggBase: *res.(*unaryAggBase)}
+func (a *BitXor) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *BitXor) NewBuffer() (sql.AggregationBuffer, error) {
@@ -464,9 +464,9 @@ func (a *Count) WithChildren(children ...sql.Expression) (sql.Expression, error)
 	return &Count{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *Count) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &Count{unaryAggBase: *res.(*unaryAggBase)}
+func (a *Count) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *Count) NewBuffer() (sql.AggregationBuffer, error) {
@@ -543,9 +543,9 @@ func (a *First) WithChildren(children ...sql.Expression) (sql.Expression, error)
 	return &First{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *First) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &First{unaryAggBase: *res.(*unaryAggBase)}
+func (a *First) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *First) NewBuffer() (sql.AggregationBuffer, error) {
@@ -622,9 +622,9 @@ func (a *JsonArray) WithChildren(children ...sql.Expression) (sql.Expression, er
 	return &JsonArray{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *JsonArray) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &JsonArray{unaryAggBase: *res.(*unaryAggBase)}
+func (a *JsonArray) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *JsonArray) NewBuffer() (sql.AggregationBuffer, error) {
@@ -701,9 +701,9 @@ func (a *Last) WithChildren(children ...sql.Expression) (sql.Expression, error) 
 	return &Last{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *Last) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &Last{unaryAggBase: *res.(*unaryAggBase)}
+func (a *Last) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *Last) NewBuffer() (sql.AggregationBuffer, error) {
@@ -780,9 +780,9 @@ func (a *Max) WithChildren(children ...sql.Expression) (sql.Expression, error) {
 	return &Max{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *Max) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &Max{unaryAggBase: *res.(*unaryAggBase)}
+func (a *Max) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *Max) NewBuffer() (sql.AggregationBuffer, error) {
@@ -859,9 +859,9 @@ func (a *Min) WithChildren(children ...sql.Expression) (sql.Expression, error) {
 	return &Min{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *Min) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &Min{unaryAggBase: *res.(*unaryAggBase)}
+func (a *Min) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *Min) NewBuffer() (sql.AggregationBuffer, error) {
@@ -938,9 +938,9 @@ func (a *Sum) WithChildren(children ...sql.Expression) (sql.Expression, error) {
 	return &Sum{unaryAggBase: *res.(*unaryAggBase)}, err
 }
 
-func (a *Sum) WithId(id sql.ColumnId) sql.IdExpression {
-	res := a.unaryAggBase.WithId(id)
-	return &Sum{unaryAggBase: *res.(*unaryAggBase)}
+func (a *Sum) SetId(id sql.ColumnId) {
+	a.unaryAggBase.SetId(id)
+	return
 }
 
 func (a *Sum) NewBuffer() (sql.AggregationBuffer, error) {

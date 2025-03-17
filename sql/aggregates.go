@@ -68,7 +68,7 @@ type WindowAdaptableExpression interface {
 type IdExpression interface {
 	Expression
 	Id() ColumnId
-	WithId(ColumnId) IdExpression
+	SetId(ColumnId)
 }
 
 // WindowFramer is responsible for tracking window frame indices for partition rows.

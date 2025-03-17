@@ -63,10 +63,10 @@ func (a *CountDistinct) Id() sql.ColumnId {
 }
 
 // WithId implements the Aggregation interface
-func (a *CountDistinct) WithId(id sql.ColumnId) sql.IdExpression {
+func (a *CountDistinct) SetId(id sql.ColumnId) {
 	ret := *a
 	ret.id = id
-	return &ret
+	return
 }
 
 // Eval implements the Expression interface.

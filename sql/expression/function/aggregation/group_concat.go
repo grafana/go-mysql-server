@@ -65,10 +65,10 @@ func (a *GroupConcat) Id() sql.ColumnId {
 }
 
 // WithId implements the Aggregation interface
-func (a *GroupConcat) WithId(id sql.ColumnId) sql.IdExpression {
+func (a *GroupConcat) SetId(id sql.ColumnId) {
 	ret := *a
 	ret.id = id
-	return &ret
+	return
 }
 
 // WithWindow implements sql.Aggregation

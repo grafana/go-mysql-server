@@ -209,47 +209,48 @@ func (b *Builder) buildAggregation(fromScope, projScope *scope, groupingCols []s
 			selectStr[strings.ToLower(e.String())] = true
 		}
 	}
-	var aliases []sql.Expression
-	for _, col := range projScope.cols {
-		// eval aliases in project scope
-		switch e := col.scalar.(type) {
-		case *expression.Alias:
-			if !e.Unreferencable() {
-				aliases = append(aliases, e.WithId(sql.ColumnId(col.id)).(*expression.Alias))
-			}
-		default:
-		}
-
-		// projection dependencies -> table cols needed above
-		transform.InspectExpr(col.scalar, func(e sql.Expression) bool {
-			switch e := e.(type) {
-			case *expression.GetField:
-				colName := strings.ToLower(e.String())
-				if !selectStr[colName] {
-					selectExprs = append(selectExprs, e)
-					selectGfs = append(selectGfs, e)
-					selectStr[colName] = true
-				}
-			default:
-			}
-			return false
-		})
-	}
-	for _, e := range fromScope.extraCols {
-		// accessory cols used by ORDER_BY, HAVING
-		if !selectStr[e.String()] {
-			selectExprs = append(selectExprs, e.scalarGf())
-			selectGfs = append(selectGfs, e.scalarGf())
-
-			selectStr[e.String()] = true
-		}
-	}
+	//var aliases []sql.Expression
+	//for _, col := range projScope.cols {
+	//	// eval aliases in project scope
+	//	switch e := col.scalar.(type) {
+	//	case *expression.Alias:
+	//		if !e.Unreferencable() {
+	//			e.SetId(sql.ColumnId(col.id))
+	//			aliases = append(aliases, e)
+	//		}
+	//	default:
+	//	}
+	//
+	//	// projection dependencies -> table cols needed above
+	//	transform.InspectExpr(col.scalar, func(e sql.Expression) bool {
+	//		switch e := e.(type) {
+	//		case *expression.GetField:
+	//			colName := strings.ToLower(e.String())
+	//			if !selectStr[colName] {
+	//				selectExprs = append(selectExprs, e)
+	//				selectGfs = append(selectGfs, e)
+	//				selectStr[colName] = true
+	//			}
+	//		default:
+	//		}
+	//		return false
+	//	})
+	//}
+	//for _, e := range fromScope.extraCols {
+	//	// accessory cols used by ORDER_BY, HAVING
+	//	if !selectStr[e.String()] {
+	//		selectExprs = append(selectExprs, e.scalarGf())
+	//		selectGfs = append(selectGfs, e.scalarGf())
+	//
+	//		selectStr[e.String()] = true
+	//	}
+	//}
 	gb := plan.NewGroupBy(selectExprs, groupingCols, fromScope.node)
 	outScope.node = gb
 
-	if len(aliases) > 0 {
-		outScope.node = plan.NewProject(append(selectGfs, aliases...), outScope.node)
-	}
+	//if len(aliases) > 0 {
+	//	outScope.node = plan.NewProject(append(selectGfs, aliases...), outScope.node)
+	//}
 	return outScope
 }
 
@@ -299,7 +300,7 @@ func (b *Builder) buildAggregateFunc(inScope *scope, name string, e *ast.FuncExp
 			id := gb.outScope.newColumn(col)
 			col.id = id
 
-			agg = agg.WithId(sql.ColumnId(id)).(sql.Aggregation)
+			agg.SetId(sql.ColumnId(id))
 			gb.outScope.cols[len(gb.outScope.cols)-1].scalar = agg
 			col.scalar = agg
 
@@ -328,7 +329,7 @@ func (b *Builder) buildAggregateFunc(inScope *scope, name string, e *ast.FuncExp
 			col := scopeColumn{col: strings.ToLower(agg.String()), scalar: agg, typ: agg.Type(), nullable: agg.IsNullable()}
 			id := gb.outScope.newColumn(col)
 
-			agg = agg.WithId(sql.ColumnId(id)).(*aggregation.JsonArray)
+			agg.SetId(sql.ColumnId(id))
 			gb.outScope.cols[len(gb.outScope.cols)-1].scalar = agg
 			col.scalar = agg
 
@@ -428,7 +429,7 @@ func (b *Builder) buildAggregateFunc(inScope *scope, name string, e *ast.FuncExp
 	col := scopeColumn{col: aggName, scalar: agg, typ: aggType, nullable: agg.IsNullable()}
 	id := gb.outScope.newColumn(col)
 
-	agg = agg.WithId(sql.ColumnId(id)).(sql.Aggregation)
+	agg.SetId(sql.ColumnId(id))
 	gb.outScope.cols[len(gb.outScope.cols)-1].scalar = agg
 	col.scalar = agg
 
@@ -485,7 +486,7 @@ func (b *Builder) buildGroupConcat(inScope *scope, e *ast.GroupConcatExpr) sql.E
 
 	id := gb.outScope.newColumn(col)
 
-	agg = agg.WithId(sql.ColumnId(id)).(*aggregation.GroupConcat)
+	agg.SetId(sql.ColumnId(id))
 	gb.outScope.cols[len(gb.outScope.cols)-1].scalar = agg
 	col.scalar = agg
 
@@ -556,7 +557,7 @@ func (b *Builder) buildWindowFunc(inScope *scope, name string, e *ast.FuncExpr, 
 	col := scopeColumn{col: strings.ToLower(win.String()), scalar: win, typ: win.Type(), nullable: win.IsNullable()}
 	id := inScope.newColumn(col)
 	col.id = id
-	win = win.WithId(sql.ColumnId(id)).(sql.WindowAdaptableExpression)
+	win.SetId(sql.ColumnId(id))
 	inScope.cols[len(inScope.cols)-1].scalar = win
 	col.scalar = win
 	inScope.windowFuncs = append(inScope.windowFuncs, col)
@@ -585,48 +586,49 @@ func (b *Builder) buildWindow(fromScope, projScope *scope) *scope {
 			}
 		}
 	}
-	var aliases []sql.Expression
-	for _, col := range projScope.cols {
-		// eval aliases in project scope
-		switch e := col.scalar.(type) {
-		case *expression.Alias:
-			if !e.Unreferencable() {
-				aliases = append(aliases, e.WithId(sql.ColumnId(col.id)).(*expression.Alias))
-			}
-		default:
-		}
-
-		// projection dependencies -> table cols needed above
-		transform.InspectExpr(col.scalar, func(e sql.Expression) bool {
-			switch e := e.(type) {
-			case *expression.GetField:
-				colName := strings.ToLower(e.String())
-				if !selectStr[colName] {
-					selectExprs = append(selectExprs, e)
-					selectGfs = append(selectGfs, e)
-					selectStr[colName] = true
-				}
-			default:
-			}
-			return false
-		})
-	}
-	for _, e := range fromScope.extraCols {
-		// accessory cols used by ORDER_BY, HAVING
-		if !selectStr[e.String()] {
-			selectExprs = append(selectExprs, e.scalarGf())
-			selectGfs = append(selectGfs, e.scalarGf())
-			selectStr[e.String()] = true
-		}
-	}
+	//var aliases []sql.Expression
+	//for _, col := range projScope.cols {
+	//	// eval aliases in project scope
+	//	switch e := col.scalar.(type) {
+	//	case *expression.Alias:
+	//		if !e.Unreferencable() {
+	//			e.SetId(sql.ColumnId(col.id))
+	//			aliases = append(aliases, e)
+	//		}
+	//	default:
+	//	}
+	//
+	//	// projection dependencies -> table cols needed above
+	//	transform.InspectExpr(col.scalar, func(e sql.Expression) bool {
+	//		switch e := e.(type) {
+	//		case *expression.GetField:
+	//			colName := strings.ToLower(e.String())
+	//			if !selectStr[colName] {
+	//				selectExprs = append(selectExprs, e)
+	//				selectGfs = append(selectGfs, e)
+	//				selectStr[colName] = true
+	//			}
+	//		default:
+	//		}
+	//		return false
+	//	})
+	//}
+	//for _, e := range fromScope.extraCols {
+	//	// accessory cols used by ORDER_BY, HAVING
+	//	if !selectStr[e.String()] {
+	//		selectExprs = append(selectExprs, e.scalarGf())
+	//		selectGfs = append(selectGfs, e.scalarGf())
+	//		selectStr[e.String()] = true
+	//	}
+	//}
 
 	outScope := fromScope
 	window := plan.NewWindow(selectExprs, fromScope.node)
 	fromScope.node = window
 
-	if len(aliases) > 0 {
-		outScope.node = plan.NewProject(append(selectGfs, aliases...), outScope.node)
-	}
+	//if len(aliases) > 0 {
+	//	outScope.node = plan.NewProject(append(selectGfs, aliases...), outScope.node)
+	//}
 
 	return outScope
 }
@@ -817,8 +819,11 @@ func (b *Builder) analyzeHaving(fromScope, projScope *scope, having *ast.Where) 
 	}, having.Expr)
 }
 
-func (b *Builder) buildInnerProj(fromScope, projScope *scope) *scope {
-	outScope := fromScope
+func (b *Builder) buildInnerProj(outScope, projScope *scope) *scope {
+
+	// todo put aliases in a project append
+	// ignore aggregation columns
+
 	var proj []sql.Expression
 
 	// eval aliases in project scope
@@ -826,27 +831,23 @@ func (b *Builder) buildInnerProj(fromScope, projScope *scope) *scope {
 		switch e := col.scalar.(type) {
 		case *expression.Alias:
 			if !e.Unreferencable() {
-				proj = append(proj, e.WithId(sql.ColumnId(col.id)).(*expression.Alias))
+				e.SetId(sql.ColumnId(col.id))
+				proj = append(proj, e)
 			}
 		}
 	}
 
-	aliasCnt := len(proj)
-
-	if len(proj) == 0 && !(len(fromScope.cols) == 1 && fromScope.cols[0].id == 0) {
-		// remove redundant projection unless it is the single dual table column
-		return outScope
-	}
-
-	for _, c := range fromScope.cols {
-		proj = append(proj, c.scalarGf())
-	}
-
-	// todo: fulltext indexes depend on match alias first
-	proj = append(proj[aliasCnt:], proj[:aliasCnt]...)
+	//if len(proj) == 0 && !(len(fromScope.cols) == 1 && fromScope.cols[0].id == 0) {
+	//	// remove redundant projection unless it is the single dual table column
+	//	for _, c := range fromScope.cols {
+	//		proj = append(proj, c.scalarGf())
+	//	}
+	//	outScope.node = plan.NewProject(proj, outScope.node)
+	//	return outScope
+	//}
 
 	if len(proj) > 0 {
-		outScope.node = plan.NewProject(proj, outScope.node)
+		outScope.node = plan.NewProjectAppend(outScope.node, proj)
 	}
 
 	return outScope

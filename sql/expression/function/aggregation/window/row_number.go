@@ -43,10 +43,10 @@ func (r *RowNumber) Id() sql.ColumnId {
 }
 
 // WithId implements sql.IdExpression
-func (r *RowNumber) WithId(id sql.ColumnId) sql.IdExpression {
+func (r *RowNumber) SetId(id sql.ColumnId) {
 	ret := *r
 	ret.id = id
-	return &ret
+	return
 }
 
 // Description implements sql.FunctionExpression

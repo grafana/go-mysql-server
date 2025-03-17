@@ -43,10 +43,10 @@ func (p *PercentRank) Id() sql.ColumnId {
 }
 
 // WithId implements sql.IdExpression
-func (p *PercentRank) WithId(id sql.ColumnId) sql.IdExpression {
+func (p *PercentRank) SetId(id sql.ColumnId) {
 	ret := *p
 	ret.id = id
-	return &ret
+	return
 }
 
 // Description implements sql.FunctionExpression

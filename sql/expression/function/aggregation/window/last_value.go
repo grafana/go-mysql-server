@@ -47,10 +47,10 @@ func (f *LastValue) Id() sql.ColumnId {
 }
 
 // WithId implements sql.IdExpression
-func (f *LastValue) WithId(id sql.ColumnId) sql.IdExpression {
+func (f *LastValue) SetId(id sql.ColumnId) {
 	ret := *f
 	ret.id = id
-	return &ret
+	return
 }
 
 // Description implements sql.FunctionExpression

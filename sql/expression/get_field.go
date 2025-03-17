@@ -76,10 +76,10 @@ func (p *GetField) Index() int { return p.fieldIndex }
 
 func (p *GetField) Id() sql.ColumnId { return p.exprId }
 
-func (p *GetField) WithId(id sql.ColumnId) sql.IdExpression {
+func (p *GetField) SetId(id sql.ColumnId) {
 	ret := *p
 	ret.exprId = id
-	return &ret
+	return
 }
 
 func (p *GetField) TableId() sql.TableId { return p.tableId }

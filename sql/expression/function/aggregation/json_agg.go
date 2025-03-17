@@ -53,10 +53,10 @@ func (j *JSONObjectAgg) Id() sql.ColumnId {
 }
 
 // WithId implements the Aggregation interface
-func (j *JSONObjectAgg) WithId(id sql.ColumnId) sql.IdExpression {
+func (j *JSONObjectAgg) SetId(id sql.ColumnId) {
 	ret := *j
 	ret.id = id
-	return &ret
+	return
 }
 
 // FunctionName implements sql.FunctionExpression

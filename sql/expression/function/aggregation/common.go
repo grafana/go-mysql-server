@@ -72,10 +72,10 @@ func (a *unaryAggBase) Id() sql.ColumnId {
 }
 
 // WithId implements the Aggregation interface
-func (a *unaryAggBase) WithId(id sql.ColumnId) sql.IdExpression {
+func (a *unaryAggBase) SetId(id sql.ColumnId) {
 	ret := *a
 	ret.id = id
-	return &ret
+	return
 }
 
 // CollationCoercibility implements the interface sql.CollationCoercible.

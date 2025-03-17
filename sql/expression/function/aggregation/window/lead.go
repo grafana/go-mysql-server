@@ -70,10 +70,10 @@ func (l *Lead) Id() sql.ColumnId {
 }
 
 // WithId implements sql.IdExpression
-func (l *Lead) WithId(id sql.ColumnId) sql.IdExpression {
+func (l *Lead) SetId(id sql.ColumnId) {
 	ret := *l
 	ret.id = id
-	return &ret
+	return
 }
 
 // Description implements sql.FunctionExpression

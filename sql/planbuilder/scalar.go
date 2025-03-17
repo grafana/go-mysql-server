@@ -17,6 +17,7 @@ package planbuilder
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/cespare/xxhash/v2"
 	"strconv"
 	"strings"
 
@@ -46,6 +47,12 @@ func (b *Builder) buildWhere(inScope *scope, where *ast.Where) {
 }
 
 func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
+	var internKey uint64
+	var err error
+	defer func() {
+		b.intern.postVisit(internKey, ex)
+	}()
+
 	defer func() {
 		if !(b.bindCtx == nil || b.bindCtx.resolveOnly) {
 			return
@@ -100,6 +107,13 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 
 		return expression.NewNot(c)
 	case *ast.SQLVal:
+		internKey, ex, err = b.intern.preVisit(v)
+		if err != nil {
+			b.handleErr(err)
+		}
+		if ex != nil {
+			return ex
+		}
 		return b.ConvertVal(v)
 	case ast.BoolVal:
 		return expression.NewLiteral(bool(v), types.Boolean)
@@ -134,9 +148,32 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 
 		origTbl := b.getOrigTblName(inScope.node, c.table)
 		c = c.withOriginal(origTbl, v.Name.String())
+		internKey = colHash(c.id, c.table, c.originalCol)
+		if e, ok := b.intern.getExpr(internKey); ok {
+			return e
+		}
 		return c.scalarGf()
 	case *ast.FuncExpr:
+		args := make([]sql.Expression, len(v.Exprs))
+		for i, e := range v.Exprs {
+			args[i] = b.selectExprToExpression(inScope, e)
+		}
+
 		name := v.Name.Lowered()
+		if name == "json_value" {
+			if len(args) == 3 {
+				args[2] = b.getJsonValueTypeLiteral(args[2])
+			}
+		}
+
+		internKey, ex, err = b.intern.preVisit(v, args...)
+		if err != nil {
+			b.handleErr(err)
+		}
+		if ex != nil {
+			return ex
+		}
+
 		if name == "name_const" {
 			return b.buildNameConst(inScope, v)
 		} else if name == "icu_version" {
@@ -154,17 +191,6 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 			// todo(max): similar names in registry?
 			err := sql.ErrFunctionNotFound.New(name)
 			b.handleErr(err)
-		}
-
-		args := make([]sql.Expression, len(v.Exprs))
-		for i, e := range v.Exprs {
-			args[i] = b.selectExprToExpression(inScope, e)
-		}
-
-		if name == "json_value" {
-			if len(args) == 3 {
-				args[2] = b.getJsonValueTypeLiteral(args[2])
-			}
 		}
 
 		rf, err := f.NewInstance(args)
@@ -235,6 +261,16 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 		charFunc.Collation = collId
 		return charFunc
 	case *ast.ConvertExpr:
+		expr := b.buildScalar(inScope, v.Expr)
+
+		internKey, ex, err = b.intern.preVisit(v, expr)
+		if err != nil {
+			b.handleErr(err)
+		}
+		if ex != nil {
+			return ex
+		}
+
 		var err error
 		typeLength := 0
 		if v.Type.Length != nil {
@@ -253,7 +289,6 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 				b.handleErr(err)
 			}
 		}
-		expr := b.buildScalar(inScope, v.Expr)
 		ret, err := b.f.buildConvert(expr, v.Type.Type, typeLength, typeScale)
 		if err != nil {
 			b.handleErr(err)
@@ -299,7 +334,21 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 		}
 		return expression.NewTuple(exprs...)
 	case *ast.BinaryExpr:
-		return b.buildBinaryScalar(inScope, v)
+		l := b.buildScalar(inScope, v.Left)
+		r := b.buildScalar(inScope, v.Right)
+		internKey, ex, err = b.intern.preVisit(v, l, r)
+		if err != nil {
+			b.handleErr(err)
+		}
+		if ex != nil {
+			return ex
+		}
+
+		expr, err := b.binaryExprToExpression(inScope, v, l, r)
+		if err != nil {
+			b.handleErr(err)
+		}
+		return expr
 	case *ast.UnaryExpr:
 		return b.buildUnaryScalar(inScope, v)
 	case *ast.Subquery:
@@ -392,8 +441,26 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 		}
 		return nil
 	case *ast.ExtractFuncExpr:
-		var unit sql.Expression = expression.NewLiteral(strings.ToUpper(v.Unit), types.LongText)
+		childHash := xxhash.New()
+		childHash.WriteString(strings.ToUpper(v.Unit))
+		childKey := childHash.Sum64()
+		var unit sql.Expression
+		if sqlExpr, ok := b.intern.getExpr(childKey); ok {
+			unit = sqlExpr
+		} else {
+			unit = expression.NewLiteral(strings.ToUpper(v.Unit), types.LongText)
+			b.intern.set(childKey, unit)
+		}
 		expr := b.buildScalar(inScope, v.Expr)
+
+		var err error
+		internKey, ex, err = b.intern.preVisit(v, unit, expr)
+		if err != nil {
+			b.handleErr(err)
+		}
+		if ex != nil {
+			return ex
+		}
 		return function.NewExtract(unit, expr)
 	case *ast.MatchExpr:
 		return b.buildMatchAgainst(inScope, v)
@@ -544,14 +611,6 @@ func (b *Builder) buildUnaryScalar(inScope *scope, e *ast.UnaryExpr) sql.Express
 		b.handleErr(err)
 	}
 	return nil
-}
-
-func (b *Builder) buildBinaryScalar(inScope *scope, be *ast.BinaryExpr) sql.Expression {
-	expr, err := b.binaryExprToExpression(inScope, be)
-	if err != nil {
-		b.handleErr(err)
-	}
-	return expr
 }
 
 // typeExpandComparisonLiteral expands comparison literals to column types
@@ -729,10 +788,7 @@ func (b *Builder) buildIsExprToExpression(inScope *scope, c *ast.IsExpr) sql.Exp
 	return nil
 }
 
-func (b *Builder) binaryExprToExpression(inScope *scope, be *ast.BinaryExpr) (sql.Expression, error) {
-	l := b.buildScalar(inScope, be.Left)
-	r := b.buildScalar(inScope, be.Right)
-
+func (b *Builder) binaryExprToExpression(inScope *scope, be *ast.BinaryExpr, l, r sql.Expression) (sql.Expression, error) {
 	operator := strings.ToLower(be.Operator)
 	switch operator {
 	case

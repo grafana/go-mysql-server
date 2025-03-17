@@ -90,9 +90,10 @@ func (b *Builder) buildSelect(inScope *scope, s *ast.Select) (outScope *scope) {
 		outScope = b.buildAggregation(fromScope, projScope, groupingCols)
 	} else if fromScope.windowFuncs != nil {
 		outScope = b.buildWindow(fromScope, projScope)
-	} else {
-		outScope = b.buildInnerProj(fromScope, projScope)
 	}
+	//} else {
+	//	outScope = b.buildInnerProj(fromScope, projScope)
+	//}
 
 	// At this point, we've combined table relations, performed aggregations,
 	// and projected aliases used in higher-level clauses. Aliases and agg
@@ -102,6 +103,10 @@ func (b *Builder) buildSelect(inScope *scope, s *ast.Select) (outScope *scope) {
 	b.buildHaving(fromScope, projScope, outScope, s.Having)
 
 	b.buildOrderBy(outScope, orderByScope)
+
+	// synthetic projections for aliases that still need to
+	// be pushed below first use
+	outScope = b.buildInnerProj(outScope, projScope)
 
 	// Last level projection restricts outputs to target projections.
 	b.buildProjection(outScope, projScope)
