@@ -16,7 +16,6 @@ package memory
 
 import (
 	"fmt"
-	"github.com/dolthub/go-mysql-server/sql/types"
 	"sort"
 	"strconv"
 	"strings"
