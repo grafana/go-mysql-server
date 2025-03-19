@@ -49,7 +49,7 @@ func (b *Builder) analyzeProjectionList(inScope, outScope *scope, selectExprs as
 					scalar:    a,
 					synthetic: true,
 				})
-				b.intern.colIdToExpr[id] = e
+				//b.intern.colIdToExpr[id] = e
 				a.SetId(sql.ColumnId(id))
 				e.SetId(sql.ColumnId(id))
 			default:

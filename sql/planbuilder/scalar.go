@@ -47,12 +47,6 @@ func (b *Builder) buildWhere(inScope *scope, where *ast.Where) {
 }
 
 func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
-	var internKey uint64
-	var err error
-	defer func() {
-		b.intern.postVisit(internKey, ex)
-	}()
-
 	defer func() {
 		if !(b.bindCtx == nil || b.bindCtx.resolveOnly) {
 			return
@@ -107,13 +101,6 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 
 		return expression.NewNot(c)
 	case *ast.SQLVal:
-		internKey, ex, err = b.intern.preVisit(v)
-		if err != nil {
-			b.handleErr(err)
-		}
-		if ex != nil {
-			return ex
-		}
 		return b.ConvertVal(v)
 	case ast.BoolVal:
 		return expression.NewLiteral(bool(v), types.Boolean)
@@ -164,14 +151,6 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 			if len(args) == 3 {
 				args[2] = b.getJsonValueTypeLiteral(args[2])
 			}
-		}
-
-		internKey, ex, err = b.intern.preVisit(v, args...)
-		if err != nil {
-			b.handleErr(err)
-		}
-		if ex != nil {
-			return ex
 		}
 
 		if name == "name_const" {
@@ -263,14 +242,6 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 	case *ast.ConvertExpr:
 		expr := b.buildScalar(inScope, v.Expr)
 
-		internKey, ex, err = b.intern.preVisit(v, expr)
-		if err != nil {
-			b.handleErr(err)
-		}
-		if ex != nil {
-			return ex
-		}
-
 		var err error
 		typeLength := 0
 		if v.Type.Length != nil {
@@ -336,13 +307,6 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 	case *ast.BinaryExpr:
 		l := b.buildScalar(inScope, v.Left)
 		r := b.buildScalar(inScope, v.Right)
-		internKey, ex, err = b.intern.preVisit(v, l, r)
-		if err != nil {
-			b.handleErr(err)
-		}
-		if ex != nil {
-			return ex
-		}
 
 		expr, err := b.binaryExprToExpression(inScope, v, l, r)
 		if err != nil {
@@ -452,15 +416,6 @@ func (b *Builder) buildScalar(inScope *scope, e ast.Expr) (ex sql.Expression) {
 			b.intern.set(childKey, unit)
 		}
 		expr := b.buildScalar(inScope, v.Expr)
-
-		var err error
-		internKey, ex, err = b.intern.preVisit(v, unit, expr)
-		if err != nil {
-			b.handleErr(err)
-		}
-		if ex != nil {
-			return ex
-		}
 		return function.NewExtract(unit, expr)
 	case *ast.MatchExpr:
 		return b.buildMatchAgainst(inScope, v)

@@ -505,8 +505,8 @@ func (s *scope) addColumn(col scopeColumn) {
 // reference, whereas addColumn only adds a preexisting expression
 // definition to a given scope.
 func (s *scope) newColumn(col scopeColumn) columnId {
-	s.b.intern.colId++
-	col.id = s.b.intern.colId
+	s.b.intern.lastColId++
+	col.id = s.b.intern.lastColId
 	if col.table != "" {
 		tabId := s.addTable(col.table)
 		col.tableId = tabId

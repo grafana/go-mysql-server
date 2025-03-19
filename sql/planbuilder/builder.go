@@ -187,7 +187,7 @@ func (b *Builder) newScope() *scope {
 }
 
 func (b *Builder) Reset() {
-	b.intern.colId = 0
+	b.intern.lastColId = 0
 	b.tabId = 0
 	b.bindCtx = nil
 	b.currentDatabase = nil

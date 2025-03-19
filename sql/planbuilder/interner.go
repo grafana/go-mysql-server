@@ -9,22 +9,40 @@ import (
 )
 
 type interner struct {
-	hashToExpr  map[uint64]sql.Expression
-	uses        map[uint64]int
-	exprToHash  map[sql.Expression]uint64
-	colIdToExpr map[columnId]sql.Expression
-	colId       columnId
+	hashToId        map[uint64]sql.ColumnId
+	uses            map[uint64]int
+	colIdToBindExpr map[sql.ColumnId]bindExpr
+	colIdToSqlExpr  map[sql.ColumnId]sql.Expression
+	lastColId       sql.ColumnId
 }
 
 func newInterner() *interner {
 	return &interner{
-		hashToExpr:  make(map[uint64]sql.Expression),
-		uses:        make(map[uint64]int),
-		exprToHash:  make(map[sql.Expression]uint64),
-		colIdToExpr: make(map[columnId]sql.Expression),
+		hashToId:        make(map[uint64]sql.ColumnId),
+		uses:            make(map[uint64]int),
+		colIdToBindExpr: make(map[sql.ColumnId]bindExpr),
+		colIdToSqlExpr:  make(map[sql.ColumnId]sql.Expression),
 	}
 }
 
+type interExpr struct {
+	id   columnId
+	deps sql.ColSet
+}
+
+func (i *interner) newExpr(h uint64, op exprOpId, e sql.Expression, children sql.ColSet) bindExpr {
+	i.lastColId++
+	id := i.lastColId
+	var colDeps sql.ColSet
+	children.ForEach(func(col sql.ColumnId) {
+		colDeps = colDeps.Union(i.colIdToBindExpr[col].colDeps)
+	})
+	be := newBindExpr(op, id, children, colDeps)
+	i.hashToId[h] = id
+	i.colIdToBindExpr[id] = be
+	i.colIdToSqlExpr[id] = e
+	return be
+}
 func (i *interner) getExpr(h uint64) (sql.Expression, bool) {
 	e, ok := i.hashToExpr[h]
 	return e, ok
@@ -43,7 +61,7 @@ func (i *interner) seen(h uint64) bool {
 	_, ok := i.hashToExpr[h]
 	return ok
 }
-func (i *interner) preVisit(e ast.Expr, children ...sql.Expression) (uint64, sql.Expression, error) {
+func (i *interner) preVisit(e ast.Expr) (uint64, sql.Expression, error) {
 	hashableTree := true
 	var childHashes []uint64
 	for _, a := range children {
@@ -80,6 +98,27 @@ func writeUint64(h *xxhash.Digest, i uint64) {
 	var b [8]byte
 	binary.BigEndian.PutUint64(b[:], i)
 	h.Write(b[:])
+}
+func writeUint16(h *xxhash.Digest, i uint16) {
+	var b [2]byte
+	binary.BigEndian.PutUint16(b[:], i)
+	h.Write(b[:])
+}
+func writeColId(h *xxhash.Digest, i sql.ColumnId) {
+	var b [2]byte
+	binary.BigEndian.PutUint16(b[:], uint16(i))
+	h.Write(b[:])
+}
+func writeTypeId(h *xxhash.Digest, i exprOpId) {
+	var b [2]byte
+	binary.BigEndian.PutUint16(b[:], uint16(i))
+	h.Write(b[:])
+}
+func writeString(h *xxhash.Digest, s string) {
+	h.WriteString(s)
+}
+func writeBytes(h *xxhash.Digest, b []byte) {
+	h.Write(b)
 }
 func colHash(id columnId, tableAlias, tableOrig string) uint64 {
 	h := xxhash.New()

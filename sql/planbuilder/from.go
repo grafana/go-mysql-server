@@ -119,7 +119,8 @@ func (b *Builder) buildJoin(inScope *scope, te *ast.JoinTableExpr) (outScope *sc
 
 	var filter sql.Expression
 	if te.Condition.On != nil {
-		filter = b.buildScalar(outScope, te.Condition.On)
+		//filter = b.buildScalar(outScope, te.Condition.On)
+		b.WalkExpr(outScope, te.Condition.On)
 	}
 
 	var op plan.JoinType
