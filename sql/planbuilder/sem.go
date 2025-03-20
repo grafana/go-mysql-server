@@ -73,6 +73,7 @@ postVisit
 */
 
 type exprOpId uint16
+
 const (
 	unknownTypeId exprOpId = iota
 	selectTypeId
@@ -85,10 +86,10 @@ const (
 )
 
 type bindExpr struct {
-	op exprOpId
-	id sql.ColumnId
+	op       exprOpId
+	id       sql.ColumnId
 	children sql.ColSet
-	colDeps sql.ColSet
+	colDeps  sql.ColSet
 }
 
 func newBindExpr(op exprOpId, id sql.ColumnId, children, colDeps sql.ColSet) bindExpr {
@@ -181,9 +182,10 @@ func visitRelational(d *xxhash.Digest, n ast.SQLNode) error {
 }
 func getExprOp(n ast.ParentSQLExpr) exprOpId {
 	switch n.(type) {
-	case ast.ExtractFuncExpr:
-	case ast.Default:
-	case ast.Col
+	case *ast.ExtractFuncExpr:
+		return jsonExtractTypeId
+	case *ast.ConvertExpr:
+		return convertTypeId
 	}
 }
 func visitTableExpr(d *xxhash.Digest, n ast.SQLNode) error {
@@ -240,25 +242,8 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 		colName := strings.ToLower(v.Name.String())
 		c, ok := inScope.resolveColumn(dbName, tblName, colName, true, false)
 		if !ok {
-			sysVar, scope, ok := b.buildSysVar(v, ast.SetScope_None)
-			if ok {
-				return sysVar
-			}
-			var err error
-			if scope == ast.SetScope_User {
-				err = sql.ErrUnknownUserVariable.New(colName)
-			} else if scope == ast.SetScope_Persist || scope == ast.SetScope_PersistOnly {
-				err = sql.ErrUnknownUserVariable.New(colName)
-			} else if scope == ast.SetScope_Global || scope == ast.SetScope_Session {
-				err = sql.ErrUnknownSystemVariable.New(colName)
-			} else if tblName != "" && !inScope.hasTable(tblName) {
-				err = sql.ErrTableNotFound.New(tblName)
-			} else if tblName != "" {
-				err = sql.ErrTableColumnNotFound.New(tblName, colName)
-			} else {
-				err = sql.ErrColumnNotFound.New(v)
-			}
-			b.handleErr(err)
+			writeString(d, strings.ToLower(v.String()))
+			return nil
 		}
 
 		origTbl := b.getOrigTblName(inScope.node, c.table)
@@ -554,4 +539,3 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 	}
 	return nil
 }
-

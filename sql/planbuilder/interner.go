@@ -132,7 +132,7 @@ func colHash(id columnId, tableAlias, tableOrig string) uint64 {
 func (i *interner) hash(e ast.Expr, children ...uint64) (uint64, error) {
 	switch e.(type) {
 	case *ast.SQLVal:
-		print()
+
 	}
 	h := xxhash.New()
 	for _, c := range children {
