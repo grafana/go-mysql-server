@@ -81,8 +81,15 @@ const (
 	defaultTypeId
 	convertTypeId
 	jsonExtractTypeId
-	colTypeId
 	litTypeId
+	comparisonTypeId
+	isTypeId
+	nullTypeId
+	notTypeId
+	colTypeId
+	boolTypeId
+	sqlValTypeId
+	caseTypeId
 )
 
 type bindExpr struct {
@@ -171,44 +178,31 @@ func (b *Builder) WalkExpr(inScope *scope, node ast.ParentSQLExpr) (sql.ColumnId
 	}
 }
 
-func visitRelational(d *xxhash.Digest, n ast.SQLNode) error {
-	switch n := n.(type) {
-	case ast.SelectStatement:
-		writeTypeId(d, selectTypeId)
-		return nil
-	default:
-		return fmt.Errorf("unsupported node type: %T", n)
-	}
-}
 func getExprOp(n ast.ParentSQLExpr) exprOpId {
 	switch n.(type) {
 	case *ast.ExtractFuncExpr:
 		return jsonExtractTypeId
 	case *ast.ConvertExpr:
 		return convertTypeId
-	}
-}
-func visitTableExpr(d *xxhash.Digest, n ast.SQLNode) error {
-	switch n := n.(type) {
-	case ast.SelectStatement:
-		writeTypeId(d, selectTypeId)
-		return nil
+	case *ast.ComparisonExpr:
+		return comparisonTypeId
+	case *ast.IsExpr:
+		return isTypeId
+	case *ast.NullVal:
+		return nullTypeId
+	case *ast.NotExpr:
+		return notTypeId
+	case *ast.SQLVal:
+		return sqlValTypeId
+	case *ast.BoolVal:
+		return boolTypeId
+	case *ast.ColName:
+		return colTypeId
+	case *ast.CaseExpr:
+		return colTypeId
 	default:
-		return fmt.Errorf("unsupported node type: %T", n)
+		return unknownTypeId
 	}
-}
-func (b *Builder) visitNode(inScope *scope, digest *xxhash.Digest, n ast.ParentSQLNode) (uint64, error) {
-	var err error
-	switch n := n.(type) {
-	case ast.Expr:
-		err = visitScalar(inScope, digest, n)
-	default:
-		return 0, fmt.Errorf("unsupported node type: %T", n)
-	}
-	if err != nil {
-		return 0, err
-	}
-	return digest.Sum64(), nil
 }
 
 func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op exprOpId) error {
@@ -221,21 +215,20 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 	//case *ast.TrimExpr:
 	//	writeTypeId(d, trimTypeId)
 	//	writeString(d, v.Dir)
-	//case *ast.ComparisonExpr:
-	//	writeString(d, strings.ToLower(v.Operator))
-	//case *ast.IsExpr:
-	//	writeString(d, strings.ToLower(v.Operator))
-	//case *ast.NotExpr:
+	case *ast.ComparisonExpr:
+		writeString(d, strings.ToLower(v.Operator))
+	case *ast.IsExpr:
+		writeString(d, strings.ToLower(v.Operator))
+	case *ast.NotExpr:
 	//	writeTypeId(d, notTypeId)
 
 	case *ast.SQLVal:
 		writeBytes(d, v.Val)
 		writeUint64(d, uint64(v.Type))
 
-	//case ast.BoolVal:
-	//	return expression.NewLiteral(bool(v), types.Boolean)
-	//case *ast.NullVal:
-	//	return expression.NewLiteral(nil, types.Null)
+	case ast.BoolVal:
+		writeBool(d, bool(v))
+	case *ast.NullVal:
 	case *ast.ColName:
 		dbName := strings.ToLower(v.Qualifier.DbQualifier.String())
 		tblName := strings.ToLower(v.Qualifier.Name.String())
@@ -256,61 +249,10 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 		writeString(d, c.originalCol)
 
 	case *ast.FuncExpr:
-		args := make([]sql.Expression, len(v.Exprs))
-		for i, e := range v.Exprs {
-			args[i] = b.selectExprToExpression(inScope, e)
-		}
-
 		name := v.Name.Lowered()
-		if name == "json_value" {
-			if len(args) == 3 {
-				args[2] = b.getJsonValueTypeLiteral(args[2])
-			}
-		}
+		writeString(d, name)
+		writeBool(d, v.Distinct)
 
-		if name == "name_const" {
-			return b.buildNameConst(inScope, v)
-		} else if name == "icu_version" {
-			return expression.NewLiteral(icuVersion, types.MustCreateString(query.Type_VARCHAR, int64(len(icuVersion)), sql.Collation_Default))
-		} else if isAggregateFunc(name) && v.Over == nil {
-			// TODO this assumes aggregate is in the same scope
-			// also need to avoid nested aggregates
-			return b.buildAggregateFunc(inScope, name, v)
-		} else if isWindowFunc(name) {
-			return b.buildWindowFunc(inScope, name, v, (*ast.WindowDef)(v.Over))
-		}
-
-		f, ok := b.cat.Function(b.ctx, name)
-		if !ok {
-			// todo(max): similar names in registry?
-			err := sql.ErrFunctionNotFound.New(name)
-			b.handleErr(err)
-		}
-
-		rf, err := f.NewInstance(args)
-		if err != nil {
-			b.handleErr(err)
-		}
-
-		switch rf.(type) {
-		case *function.Sleep, sql.NonDeterministicExpression:
-			b.qFlags.Set(sql.QFlagUndeferrableExprs)
-		}
-
-		// NOTE: Not all aggregate functions support DISTINCT. Fortunately, the vitess parser will throw
-		// errors for when DISTINCT is used on aggregate functions that don't support DISTINCT.
-		if v.Distinct {
-			if len(args) != 1 {
-				return nil
-			}
-			args[0] = expression.NewDistinctExpression(args[0])
-		}
-
-		if _, ok := rf.(sql.NonDeterministicExpression); ok && inScope.nearestSubquery() != nil {
-			inScope.nearestSubquery().markVolatile()
-		}
-
-		return rf
 	//case *ast.GroupConcatExpr:
 	//	// TODO this is an aggregation
 	//	return b.buildGroupConcat(inScope, v)
@@ -355,31 +297,8 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 	//	charFunc.Collation = collId
 	//	return charFunc
 	case *ast.ConvertExpr:
-		expr := b.buildScalar(inScope, v.Expr)
-
-		var err error
-		typeLength := 0
-		if v.Type.Length != nil {
-			// TODO move to vitess
-			typeLength, err = strconv.Atoi(v.Type.Length.String())
-			if err != nil {
-				b.handleErr(err)
-			}
-		}
-
-		typeScale := 0
-		if v.Type.Scale != nil {
-			// TODO move to vitess
-			typeScale, err = strconv.Atoi(v.Type.Scale.String())
-			if err != nil {
-				b.handleErr(err)
-			}
-		}
-		ret, err := b.f.buildConvert(expr, v.Type.Type, typeLength, typeScale)
-		if err != nil {
-			b.handleErr(err)
-		}
-		return ret
+		writeBytes(d, v.Type.Length.Val)
+		writeBytes(d, v.Type.Scale.Val)
 	//case ast.InjectedExpr:
 	//	if err := b.cat.AuthorizationHandler().HandleAuth(b.ctx, b.authQueryState, v.Auth); err != nil && b.authEnabled {
 	//		b.handleErr(err)
@@ -420,17 +339,10 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 	//	}
 	//	return expression.NewTuple(exprs...)
 	case *ast.BinaryExpr:
-		l := b.buildScalar(inScope, v.Left)
-		r := b.buildScalar(inScope, v.Right)
-
-		expr, err := b.binaryExprToExpression(inScope, v, l, r)
-		if err != nil {
-			b.handleErr(err)
-		}
-		return expr
-	//case *ast.UnaryExpr:
-	//	return b.buildUnaryScalar(inScope, v)
-	//case *ast.Subquery:
+		writeString(d, v.Operator)
+	case *ast.UnaryExpr:
+		writeString(d, v.Operator)
+		//case *ast.Subquery:
 	//	sqScope := inScope.pushSubquery()
 	//	inScope.refsSubquery = true
 	//	selectString := ast.String(v.Select)
@@ -443,8 +355,8 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 	//		sq = sq.WithVolatile()
 	//	}
 	//	return sq
-	//case *ast.CaseExpr:
-	//	return b.buildCaseExpr(inScope, v)
+	case *ast.CaseExpr:
+		//return b.buildCaseExpr(inScope, v)
 	//case *ast.IntervalExpr:
 	//	e := b.buildScalar(inScope, v.Expr)
 	//	b.qFlags.Set(sql.QFlagInterval)
@@ -520,18 +432,8 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 	//	}
 	//	return nil
 	case *ast.ExtractFuncExpr:
-		childHash := xxhash.New()
-		childHash.WriteString(strings.ToUpper(v.Unit))
-		childKey := childHash.Sum64()
-		var unit sql.Expression
-		if sqlExpr, ok := b.intern.getExpr(childKey); ok {
-			unit = sqlExpr
-		} else {
-			unit = expression.NewLiteral(strings.ToUpper(v.Unit), types.LongText)
-			b.intern.set(childKey, unit)
-		}
-		expr := b.buildScalar(inScope, v.Expr)
-		return function.NewExtract(unit, expr)
+		writeString(d, strings.ToLower(v.Name))
+		writeString(d, strings.ToLower(v.Unit))
 	//case *ast.MatchExpr:
 	//	return b.buildMatchAgainst(inScope, v)
 	default:

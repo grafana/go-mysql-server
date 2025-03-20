@@ -104,6 +104,11 @@ func writeUint16(h *xxhash.Digest, i uint16) {
 	binary.BigEndian.PutUint16(b[:], i)
 	h.Write(b[:])
 }
+func writeInt(h *xxhash.Digest, i int) {
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], uint64(i))
+	h.Write(b[:])
+}
 func writeColId(h *xxhash.Digest, i sql.ColumnId) {
 	var b [2]byte
 	binary.BigEndian.PutUint16(b[:], uint16(i))
@@ -116,6 +121,15 @@ func writeTypeId(h *xxhash.Digest, i exprOpId) {
 }
 func writeString(h *xxhash.Digest, s string) {
 	h.WriteString(s)
+}
+func writeBool(h *xxhash.Digest, t bool) {
+	var b [2]byte
+	if t {
+		binary.BigEndian.PutUint16(b[:], uint16(1))
+	} else {
+		binary.BigEndian.PutUint16(b[:], uint16(2))
+	}
+	h.Write(b[:])
 }
 func writeBytes(h *xxhash.Digest, b []byte) {
 	h.Write(b)
