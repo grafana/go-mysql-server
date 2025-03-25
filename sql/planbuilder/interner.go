@@ -10,7 +10,8 @@ import (
 
 type interner struct {
 	hashToId        map[uint64]sql.ColumnId
-	uses            map[uint64]int
+	uses            map[sql.ColumnId]int
+	sensitive       sql.ColSet
 	colIdToBindExpr map[sql.ColumnId]bindExpr
 	colIdToSqlExpr  map[sql.ColumnId]sql.Expression
 	lastColId       sql.ColumnId
@@ -19,7 +20,7 @@ type interner struct {
 func newInterner() *interner {
 	return &interner{
 		hashToId:        make(map[uint64]sql.ColumnId),
-		uses:            make(map[uint64]int),
+		uses:            make(map[sql.ColumnId]int),
 		colIdToBindExpr: make(map[sql.ColumnId]bindExpr),
 		colIdToSqlExpr:  make(map[sql.ColumnId]sql.Expression),
 	}
@@ -30,69 +31,43 @@ type interExpr struct {
 	deps sql.ColSet
 }
 
+func (i *interner) walkExpr(be bindExpr, cb func(e sql.Expression)) {
+	cb(i.colIdToSqlExpr[be.id])
+	be.children.ForEach(func(id sql.ColumnId) {
+		cb(i.colIdToSqlExpr[id])
+	})
+}
+
 func (i *interner) newExpr(h uint64, op exprOpId, e sql.Expression, children sql.ColSet) bindExpr {
+	if e == nil {
+		return bindExpr{}
+	}
 	i.lastColId++
 	id := i.lastColId
 	var colDeps sql.ColSet
 	children.ForEach(func(col sql.ColumnId) {
 		colDeps = colDeps.Union(i.colIdToBindExpr[col].colDeps)
 	})
-	be := newBindExpr(op, id, children, colDeps)
+	be := newBindExpr(op, id, children, colDeps, e.Type(), e.IsNullable())
 	i.hashToId[h] = id
 	i.colIdToBindExpr[id] = be
 	i.colIdToSqlExpr[id] = e
 	return be
 }
-func (i *interner) getExpr(h uint64) (sql.Expression, bool) {
-	e, ok := i.hashToExpr[h]
-	return e, ok
-}
-
-func (i *interner) getHash(e sql.Expression) (uint64, bool) {
-	h, ok := i.exprToHash[e]
-	return h, ok
-}
-
-func (i *interner) set(h uint64, e sql.Expression) {
-	i.hashToExpr[h] = e
-}
-
-func (i *interner) seen(h uint64) bool {
-	_, ok := i.hashToExpr[h]
-	return ok
-}
-func (i *interner) preVisit(e ast.Expr) (uint64, sql.Expression, error) {
-	hashableTree := true
-	var childHashes []uint64
-	for _, a := range children {
-		h, ok := i.getHash(a)
-		if !ok {
-			hashableTree = false
-			break
-		}
-		childHashes = append(childHashes, h)
+func (i *interner) newRef(e sql.Expression, children sql.ColSet) bindExpr {
+	if e == nil {
+		panic("nil alias")
 	}
-	if hashableTree {
-		h, err := i.hash(e, childHashes...)
-		if err != nil {
-			return 0, nil, err
-		}
-		if e, ok := i.getExpr(h); ok {
-			return h, e, nil
-		}
-		return h, nil, nil
-	}
-	return 0, nil, nil
-}
-func (i *interner) postVisit(h uint64, e sql.Expression) {
-	if h > 0 {
-		i.uses[h]++
-		if i.uses[h] > 1 {
-			return
-		}
-		i.hashToExpr[h] = e
-		i.exprToHash[e] = h
-	}
+	i.lastColId++
+	id := i.lastColId
+	var colDeps sql.ColSet
+	children.ForEach(func(col sql.ColumnId) {
+		colDeps = colDeps.Union(i.colIdToBindExpr[col].colDeps)
+	})
+	be := newBindExpr(aliasTypeId, id, children, colDeps, e.Type(), e.IsNullable())
+	i.colIdToBindExpr[id] = be
+	i.colIdToSqlExpr[id] = e
+	return be
 }
 func writeUint64(h *xxhash.Digest, i uint64) {
 	var b [8]byte

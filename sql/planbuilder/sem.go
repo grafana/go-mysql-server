@@ -6,9 +6,6 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/expression"
-	"github.com/dolthub/go-mysql-server/sql/expression/function"
-	"github.com/dolthub/go-mysql-server/sql/types"
-	"github.com/dolthub/vitess/go/vt/proto/query"
 	ast "github.com/dolthub/vitess/go/vt/sqlparser"
 	"strconv"
 	"strings"
@@ -81,48 +78,65 @@ const (
 	defaultTypeId
 	convertTypeId
 	jsonExtractTypeId
+	selectExprsTypeId
 	litTypeId
 	comparisonTypeId
 	isTypeId
+	aliasTypeId
 	nullTypeId
 	notTypeId
 	colTypeId
 	boolTypeId
 	sqlValTypeId
 	caseTypeId
+	funcTypeId
+	overTypeId
+	binaryExprTypeId
+	whenTypeId
 )
 
 type bindExpr struct {
 	op       exprOpId
 	id       sql.ColumnId
+	typ      sql.Type
+	nullable bool
 	children sql.ColSet
 	colDeps  sql.ColSet
+	i        *interner
 }
 
-func newBindExpr(op exprOpId, id sql.ColumnId, children, colDeps sql.ColSet) bindExpr {
-	return bindExpr{op: op, id: id, children: children, colDeps: colDeps}
+func newBindExpr(op exprOpId, id sql.ColumnId, children, colDeps sql.ColSet, typ sql.Type, nullable bool) bindExpr {
+	return bindExpr{op: op, id: id, children: children, colDeps: colDeps, typ: typ, nullable: nullable}
 }
 
 var _ sql.Expression = (*bindExpr)(nil)
 
+func (b bindExpr) ToGf() *expression.GetField {
+	return expression.NewGetField(int(b.id), b.typ, b.String(), b.nullable)
+}
+
+func (b bindExpr) Id() sql.ColumnId {
+	return b.id
+}
+
+func (b bindExpr) SetId(id sql.ColumnId) {
+	b.id = id
+}
+
 func (b bindExpr) Resolved() bool {
-	//TODO implement me
-	panic("implement me")
+	return true
 }
 
 func (b bindExpr) String() string {
-	//TODO implement me
-	panic("implement me")
+	return ":v" + strconv.Itoa(int(b.id))
 }
 
 func (b bindExpr) Type() sql.Type {
-	//TODO implement me
-	panic("implement me")
+	return b.typ
 }
 
 func (b bindExpr) IsNullable() bool {
-	//TODO implement me
-	panic("implement me")
+	return b.nullable
 }
 
 func (b bindExpr) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
@@ -131,8 +145,7 @@ func (b bindExpr) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 }
 
 func (b bindExpr) Children() []sql.Expression {
-	//TODO implement me
-	panic("implement me")
+	return nil
 }
 
 func (b bindExpr) WithChildren(children ...sql.Expression) (sql.Expression, error) {
@@ -170,6 +183,7 @@ func (b *Builder) WalkExpr(inScope *scope, node ast.ParentSQLExpr) (sql.ColumnId
 	}
 	h := digest.Sum64()
 	if id, ok := b.intern.hashToId[h]; ok && h != 0 {
+		b.intern.uses[id]++
 		return id, nil
 	} else {
 		e := b.buildScalar(inScope, node)
@@ -182,10 +196,14 @@ func getExprOp(n ast.ParentSQLExpr) exprOpId {
 	switch n.(type) {
 	case *ast.ExtractFuncExpr:
 		return jsonExtractTypeId
+	case ast.SelectExprs:
+		return selectExprsTypeId
 	case *ast.ConvertExpr:
 		return convertTypeId
 	case *ast.ComparisonExpr:
 		return comparisonTypeId
+	case *ast.AliasedExpr:
+		return aliasTypeId
 	case *ast.IsExpr:
 		return isTypeId
 	case *ast.NullVal:
@@ -199,9 +217,17 @@ func getExprOp(n ast.ParentSQLExpr) exprOpId {
 	case *ast.ColName:
 		return colTypeId
 	case *ast.CaseExpr:
-		return colTypeId
+		return caseTypeId
+	case *ast.FuncExpr:
+		return funcTypeId
+	case *ast.Over:
+		return overTypeId
+	case *ast.BinaryExpr:
+		return binaryExprTypeId
+	case *ast.When:
+		return whenTypeId
 	default:
-		return unknownTypeId
+		panic(fmt.Sprintf("unknown type %T", n))
 	}
 }
 
@@ -221,6 +247,9 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 		writeString(d, strings.ToLower(v.Operator))
 	case *ast.NotExpr:
 	//	writeTypeId(d, notTypeId)
+
+	case *ast.AliasedExpr:
+		writeString(d, v.As.Lowered())
 
 	case *ast.SQLVal:
 		writeBytes(d, v.Val)
@@ -297,8 +326,12 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 	//	charFunc.Collation = collId
 	//	return charFunc
 	case *ast.ConvertExpr:
-		writeBytes(d, v.Type.Length.Val)
-		writeBytes(d, v.Type.Scale.Val)
+		if v.Type.Length != nil {
+			writeBytes(d, v.Type.Length.Val)
+		}
+		if v.Type.Scale != nil {
+			writeBytes(d, v.Type.Scale.Val)
+		}
 	//case ast.InjectedExpr:
 	//	if err := b.cat.AuthorizationHandler().HandleAuth(b.ctx, b.authQueryState, v.Auth); err != nil && b.authEnabled {
 	//		b.handleErr(err)
@@ -431,13 +464,19 @@ func (b *Builder) visitScalar(inScope *scope, d *xxhash.Digest, n ast.Expr, op e
 	//		return nil
 	//	}
 	//	return nil
+	case *ast.Over:
+		if v == nil {
+			return nil
+		}
 	case *ast.ExtractFuncExpr:
 		writeString(d, strings.ToLower(v.Name))
 		writeString(d, strings.ToLower(v.Unit))
+	case ast.SelectExprs:
 	//case *ast.MatchExpr:
 	//	return b.buildMatchAgainst(inScope, v)
+	case *ast.When:
 	default:
-		b.handleErr(sql.ErrUnsupportedSyntax.New(ast.String(e)))
+		b.handleErr(sql.ErrUnsupportedSyntax.New(ast.String(v)))
 	}
 	return nil
 }

@@ -30,11 +30,11 @@ type subquery struct {
 // check and tag every scope in between scope_0...scope_n-1 that is a subquery.
 // This prevents propagating the correlation tag above the scope where the
 // column is defined.
-func (s *subquery) addOutOfScope(c columnId) {
+func (s *subquery) addOutOfScope(c sql.ColumnId) {
 	if s == nil {
 		return
 	}
-	s.correlated.Add(sql.ColumnId(c))
+	s.correlated.Add(c)
 }
 
 // markVolatile marks this and every parent subquery as volatile.

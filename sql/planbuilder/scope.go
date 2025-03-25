@@ -56,7 +56,7 @@ type scope struct {
 	windowFuncs []scopeColumn
 	windowDefs  map[string]*sql.WindowDefinition
 	// exprs collects unique expression ids for reference
-	exprs map[string]columnId
+	exprs map[string]sql.ColumnId
 	proc  *procCtx
 
 	insertTableAlias    string
@@ -185,7 +185,7 @@ func (s *scope) triggerCol(table, col string) (scopeColumn, bool) {
 
 // getExpr returns a columnId if the given expression has
 // been built.
-func (s *scope) getExpr(name string, checkCte bool) (columnId, bool) {
+func (s *scope) getExpr(name string, checkCte bool) (sql.ColumnId, bool) {
 	n := strings.ToLower(name)
 	id, ok := s.exprs[n]
 	if !ok && s.groupBy != nil {
@@ -308,7 +308,7 @@ func (s *scope) setColAlias(cols []string) {
 		err := sql.ErrColumnCountMismatch.New()
 		s.b.handleErr(err)
 	}
-	ids := make([]columnId, len(cols))
+	ids := make([]sql.ColumnId, len(cols))
 	for i := range s.cols {
 		beforeColStr := s.cols[i].String()
 		id, ok := s.getExpr(beforeColStr, true)
@@ -423,7 +423,7 @@ func (s *scope) copy() *scope {
 		}
 	}
 	if s.exprs != nil {
-		ret.exprs = make(map[string]columnId, len(s.exprs))
+		ret.exprs = make(map[string]sql.ColumnId, len(s.exprs))
 		for k, v := range s.exprs {
 			ret.exprs[k] = v
 		}
@@ -494,7 +494,7 @@ func (s *scope) addColumn(col scopeColumn) {
 	s.cols = append(s.cols, col)
 	s.colset.Add(sql.ColumnId(col.id))
 	if s.exprs == nil {
-		s.exprs = make(map[string]columnId)
+		s.exprs = make(map[string]sql.ColumnId)
 	}
 	s.exprs[strings.ToLower(col.String())] = col.id
 	return
@@ -504,13 +504,14 @@ func (s *scope) addColumn(col scopeColumn) {
 // new columnId for referencing. newColumn builds a new expression
 // reference, whereas addColumn only adds a preexisting expression
 // definition to a given scope.
-func (s *scope) newColumn(col scopeColumn) columnId {
-	s.b.intern.lastColId++
-	col.id = s.b.intern.lastColId
+func (s *scope) newColumn(col scopeColumn) sql.ColumnId {
 	if col.table != "" {
 		tabId := s.addTable(col.table)
 		col.tableId = tabId
 	}
+	s.b.intern.lastColId++
+	col.id = s.b.intern.lastColId
+
 	s.addColumn(col)
 	return col.id
 }
@@ -541,9 +542,9 @@ func (s *scope) addColumns(cols []scopeColumn) {
 	s.cols = append(s.cols, cols...)
 }
 
-func (s *scope) addExpressions(newExprs map[string]columnId) {
+func (s *scope) addExpressions(newExprs map[string]sql.ColumnId) {
 	if s.exprs == nil {
-		s.exprs = make(map[string]columnId)
+		s.exprs = make(map[string]sql.ColumnId)
 	}
 	for k, v := range newExprs {
 		s.exprs[k] = v
@@ -555,7 +556,7 @@ func (s *scope) addExpressions(newExprs map[string]columnId) {
 func (s *scope) appendColumnsFromScope(src *scope) {
 	s.cols = append(s.cols, src.cols...)
 	if len(src.exprs) > 0 && s.exprs == nil {
-		s.exprs = make(map[string]columnId)
+		s.exprs = make(map[string]sql.ColumnId)
 	}
 	for k, v := range src.exprs {
 		s.exprs[k] = v
@@ -593,7 +594,7 @@ type scopeColumn struct {
 	descending  bool
 	outOfScope  bool
 	synthetic   bool
-	id          columnId
+	id          sql.ColumnId
 	typ         sql.Type
 	scalar      sql.Expression
 	tableId     sql.TableId
@@ -618,11 +619,11 @@ func (c scopeColumn) equals(other scopeColumn) bool {
 	return false
 }
 
-func (c scopeColumn) unwrapGetFieldAliasId() columnId {
+func (c scopeColumn) unwrapGetFieldAliasId() sql.ColumnId {
 	if c.scalar != nil {
 		if a, ok := c.scalar.(*expression.Alias); ok {
 			if gf, ok := a.Child.(*expression.GetField); ok {
-				return columnId(gf.Id())
+				return gf.Id()
 			}
 		}
 	}

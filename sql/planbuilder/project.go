@@ -15,7 +15,7 @@
 package planbuilder
 
 import (
-	"strconv"
+	"fmt"
 	"strings"
 
 	ast "github.com/dolthub/vitess/go/vt/sqlparser"
@@ -28,34 +28,34 @@ import (
 
 func (b *Builder) analyzeProjectionList(inScope, outScope *scope, selectExprs ast.SelectExprs) {
 	b.analyzeSelectList(inScope, outScope, selectExprs)
-
-	var i int
-	for h, cnt := range b.intern.uses {
-		if cnt > 1 {
-			switch e := b.intern.hashToExpr[h].(type) {
-			case *expression.GetField, *expression.Alias:
-			case sql.IdExpression:
-				// expr used repeatedly
-				// add alias to expr
-				// replace expr uses with getfield reference
-				copyE, _ := e.WithChildren(e.Children()...)
-				name := "%synth_" + strconv.Itoa(i)
-				a := expression.NewAlias(name, copyE)
-				id := outScope.newColumn(scopeColumn{
-					db:        "",
-					table:     "",
-					col:       name,
-					typ:       a.Type(),
-					scalar:    a,
-					synthetic: true,
-				})
-				//b.intern.colIdToExpr[id] = e
-				a.SetId(sql.ColumnId(id))
-				e.SetId(sql.ColumnId(id))
-			default:
-			}
-		}
-	}
+	//
+	//var i int
+	//for h, cnt := range b.intern.uses {
+	//	if cnt > 1 {
+	//		switch e := b.intern.hashToExpr[h].(type) {
+	//		case *expression.GetField, *expression.Alias:
+	//		case sql.IdExpression:
+	//			// expr used repeatedly
+	//			// add alias to expr
+	//			// replace expr uses with getfield reference
+	//			copyE, _ := e.WithChildren(e.Children()...)
+	//			name := "%synth_" + strconv.Itoa(i)
+	//			a := expression.NewAlias(name, copyE)
+	//			id := outScope.newColumn(scopeColumn{
+	//				db:        "",
+	//				table:     "",
+	//				col:       name,
+	//				typ:       a.Type(),
+	//				scalar:    a,
+	//				synthetic: true,
+	//			})
+	//			//b.intern.colIdToExpr[id] = e
+	//			a.SetId(sql.ColumnId(id))
+	//			e.SetId(sql.ColumnId(id))
+	//		default:
+	//		}
+	//	}
+	//}
 }
 
 func (b *Builder) analyzeSelectList(inScope, outScope *scope, selectExprs ast.SelectExprs) {
@@ -76,26 +76,30 @@ func (b *Builder) analyzeSelectList(inScope, outScope *scope, selectExprs ast.Se
 		// TODO two passes for symbol res and semantic validation
 		var aRef string
 		var subqueryFound bool
-		inScopeAliasRef := transform.InspectExpr(pe, func(e sql.Expression) bool {
-			var id columnId
+		var cb func(e sql.Expression) bool
+		cb = func(e sql.Expression) bool {
+			var id sql.ColumnId
 			switch e := e.(type) {
 			case *expression.GetField:
 				if e.Table() == "" {
-					id = columnId(e.Id())
+					id = e.Id()
 					aRef = e.Name()
 				}
 			case *expression.Alias:
-				id = columnId(e.Id())
+				id = e.Id()
 				aRef = e.Name()
 			case *plan.Subquery:
 				subqueryFound = true
+			case bindExpr:
+				b.intern.walkExpr(e, func(e sql.Expression) { cb(e) })
 			}
 			if aRef != "" {
 				collisionId, ok := tempScope.exprs[strings.ToLower(aRef)]
 				return ok && id == collisionId
 			}
 			return false
-		})
+		}
+		inScopeAliasRef := transform.InspectExpr(pe, cb)
 		if inScopeAliasRef {
 			err := sql.ErrMisusedAlias.New(aRef)
 			b.handleErr(err)
@@ -144,14 +148,16 @@ func (b *Builder) analyzeSelectList(inScope, outScope *scope, selectExprs ast.Se
 				b.handleErr(err)
 			}
 		case *expression.Alias:
-			var col scopeColumn
+			col := scopeColumn{col: e.Name(), scalar: e, typ: e.Type(), nullable: e.IsNullable()}
+			var childIds sql.ColSet
+
 			if a, ok := e.Child.(*expression.Alias); ok {
 				if _, ok := tempScope.exprs[a.Name()]; ok {
 					// can't ref alias within the same scope
 					err := sql.ErrMisusedAlias.New(e.Name())
 					b.handleErr(err)
 				}
-				col = scopeColumn{col: e.Name(), scalar: e, typ: e.Type(), nullable: e.IsNullable()}
+				childIds.Add(a.Id())
 			} else if gf, ok := e.Child.(*expression.GetField); ok && gf.Table() == "" {
 				// potential alias only if table is empty
 				if _, ok := tempScope.exprs[gf.Name()]; ok {
@@ -164,27 +170,31 @@ func (b *Builder) analyzeSelectList(inScope, outScope *scope, selectExprs ast.Se
 					err := sql.ErrColumnNotFound.New(gf.String())
 					b.handleErr(err)
 				}
-				col = scopeColumn{id: id, tableId: gf.TableId(), col: e.Name(), db: gf.Database(), table: gf.Table(), scalar: e, typ: gf.Type(), nullable: gf.IsNullable()}
-			} else if sq, ok := e.Child.(*plan.Subquery); ok {
-				col = scopeColumn{col: e.Name(), scalar: e, typ: sq.Type(), nullable: sq.IsNullable()}
-			} else {
-				col = scopeColumn{col: e.Name(), scalar: e, typ: e.Type(), nullable: e.IsNullable()}
-			}
-			if e.Unreferencable() {
-				outScope.addColumn(col)
-			} else {
-				id := outScope.newColumn(col)
+				col.tableId = gf.TableId()
+				col.db = gf.Database()
+				col.table = gf.Table()
 				col.id = id
-				e.SetId(sql.ColumnId(id))
-				outScope.cols[len(outScope.cols)-1].scalar = e
-				col.scalar = e
-				tempScope.addColumn(col)
+				childIds.Add(col.id)
+			} else if be, ok := e.Child.(bindExpr); ok {
+				childIds.Add(be.Id())
 			}
+
+			be := b.intern.newRef(col.scalar, childIds)
+			col.id = be.id
+			e.SetId(be.id)
+			b.intern.colIdToSqlExpr[be.id] = e
+			b.intern.colIdToBindExpr[be.id] = be
+			col.scalar = e
+			outScope.addColumn(col)
+			outScope.cols[len(outScope.cols)-1].scalar = e
+			tempScope.addColumn(col)
 			exprs = append(exprs, e)
+
 		default:
-			exprs = append(exprs, pe)
-			col := scopeColumn{col: pe.String(), scalar: pe, typ: pe.Type()}
-			outScope.newColumn(col)
+			//exprs = append(exprs, pe)
+			//col := scopeColumn{col: pe.String(), scalar: pe, typ: pe.Type()}
+			//outScope.newColumn(col)
+			panic(fmt.Errorf("unhandled  analyzeSelectList expression %T", e))
 		}
 	}
 
@@ -203,7 +213,7 @@ func (b *Builder) selectExprToExpression(inScope *scope, se ast.SelectExpr) sql.
 		}
 		return expression.NewQualifiedStar(strings.ToLower(e.TableName.Name.String()))
 	case *ast.AliasedExpr:
-		expr := b.buildScalar(inScope, e.Expr)
+		expr := b.scalarExpr(inScope, e.Expr)
 		if !e.As.IsEmpty() {
 			return expression.NewAlias(e.As.String(), expr)
 		}

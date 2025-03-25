@@ -119,8 +119,7 @@ func (b *Builder) buildJoin(inScope *scope, te *ast.JoinTableExpr) (outScope *sc
 
 	var filter sql.Expression
 	if te.Condition.On != nil {
-		//filter = b.buildScalar(outScope, te.Condition.On)
-		b.WalkExpr(outScope, te.Condition.On)
+		filter = b.scalarExpr(outScope, te.Condition.On)
 	}
 
 	var op plan.JoinType
@@ -364,7 +363,7 @@ func (b *Builder) buildDataSource(inScope *scope, te ast.TableExpr) (outScope *s
 				exprs := make([]sql.Expression, len(vt))
 				exprTuples[i] = exprs
 				for j, e := range vt {
-					exprs[j] = b.buildScalar(inScope, e)
+					exprs[j] = b.scalarExpr(inScope, e)
 				}
 			}
 
@@ -452,7 +451,7 @@ func (b *Builder) buildTableFunc(inScope *scope, t *ast.TableFuncExpr) (outScope
 	for _, expr := range t.Exprs {
 		switch e := expr.(type) {
 		case *ast.AliasedExpr:
-			scalarExpr := b.buildScalar(inScope, e.Expr)
+			scalarExpr := b.scalarExpr(inScope, e.Expr)
 			args = append(args, scalarExpr)
 		default:
 			b.handleErr(sql.ErrUnsupportedSyntax.New(ast.String(e)))
@@ -556,13 +555,13 @@ func (b *Builder) buildJSONTableCols(inScope *scope, jtSpec *ast.JSONTableSpec) 
 		if jtColDef.Opts.ValOnEmpty == nil {
 			defEmptyVal = expression.NewLiteral(nil, types.Null)
 		} else {
-			defEmptyVal = b.buildScalar(inScope, jtColDef.Opts.ValOnEmpty)
+			defEmptyVal = b.scalarExpr(inScope, jtColDef.Opts.ValOnEmpty)
 		}
 
 		if jtColDef.Opts.ValOnError == nil {
 			defErrorVal = expression.NewLiteral(nil, types.Null)
 		} else {
-			defErrorVal = b.buildScalar(inScope, jtColDef.Opts.ValOnError)
+			defErrorVal = b.scalarExpr(inScope, jtColDef.Opts.ValOnError)
 		}
 
 		col := plan.JSONTableCol{
@@ -584,8 +583,8 @@ func (b *Builder) buildJSONTableCols(inScope *scope, jtSpec *ast.JSONTableSpec) 
 }
 
 func (b *Builder) buildJSONTable(inScope *scope, t *ast.JSONTableExpr) (outScope *scope) {
-	data := b.buildScalar(inScope, t.Data)
-	if _, ok := data.(*plan.Subquery); ok {
+	data := b.scalarExpr(inScope, t.Data)
+	if _, ok := b.intern.colIdToSqlExpr[data.id].(*plan.Subquery); ok {
 		b.handleErr(sql.ErrInvalidArgument.New("JSON_TABLE"))
 	}
 

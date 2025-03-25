@@ -32,17 +32,17 @@ import (
 var _ ast.Expr = (*aggregateInfo)(nil)
 
 type groupBy struct {
-	inCols   []scopeColumn
+	inCols   sql.ColSet // could be colset
 	outScope *scope
 	aggs     map[string]scopeColumn
 	grouping map[string]bool
 }
 
-func (g *groupBy) addInCol(c scopeColumn) {
-	g.inCols = append(g.inCols, c)
+func (g *groupBy) addChild(id sql.ColumnId) {
+	g.inCols.Add(id)
 }
 
-func (g *groupBy) addOutCol(c scopeColumn) columnId {
+func (g *groupBy) addOutCol(c scopeColumn) sql.ColumnId {
 	return g.outScope.newColumn(c)
 }
 
@@ -135,7 +135,7 @@ func (b *Builder) buildGroupingCols(fromScope, projScope *scope, groupby ast.Gro
 			}
 			col = projScope.cols[intIdx-1]
 		default:
-			expr := b.buildScalar(fromScope, e)
+			expr := b.scalarExpr(fromScope, e)
 			col = scopeColumn{
 				col:      expr.String(),
 				typ:      nil,
@@ -152,7 +152,7 @@ func (b *Builder) buildGroupingCols(fromScope, projScope *scope, groupby ast.Gro
 			}
 			col.scalar = gf.WithIndex(int(id))
 		}
-		g.addInCol(col)
+		g.addChild(col)
 		groupings = append(groupings, col.scalar)
 	}
 
@@ -359,19 +359,19 @@ func (b *Builder) buildAggregateFunc(inScope *scope, name string, e *ast.FuncExp
 				}
 			}
 			args = append(args, e)
-			col := scopeColumn{tableId: e.TableID(), db: e.Database(), table: e.Table(), col: e.Name(), scalar: e, typ: e.Type(), nullable: e.IsNullable()}
-			gb.addInCol(col)
+			//col := scopeColumn{tableId: e.TableID(), db: e.Database(), table: e.Table(), col: e.Name(), scalar: e, typ: e.Type(), nullable: e.IsNullable()}
+			gb.addChild(e.Id())
 		case *expression.Star:
 			err := sql.ErrStarUnsupported.New()
 			b.handleErr(err)
 		case *plan.Subquery:
 			args = append(args, e)
-			col := scopeColumn{col: e.QueryString, scalar: e, typ: e.Type()}
-			gb.addInCol(col)
+			//col := scopeColumn{col: e.QueryString, scalar: e, typ: e.Type()}
+			//gb.addChild(col)
 		default:
 			args = append(args, e)
-			col := scopeColumn{col: e.String(), scalar: e, typ: e.Type()}
-			gb.addInCol(col)
+			//col := scopeColumn{col: e.String(), scalar: e, typ: e.Type()}
+			//gb.addChild(col)
 		}
 	}
 
@@ -674,7 +674,7 @@ func (b *Builder) buildWindowDef(fromScope *scope, def *ast.WindowDef) *sql.Wind
 	var sortFields sql.SortFields
 	for _, c := range def.OrderBy {
 		// resolve col in fromScope
-		e := b.buildScalar(fromScope, c.Expr)
+		e := b.scalarExpr(fromScope, c.Expr)
 		so := sql.Ascending
 		if c.Direction == ast.DescScr {
 			so = sql.Descending
@@ -688,7 +688,7 @@ func (b *Builder) buildWindowDef(fromScope *scope, def *ast.WindowDef) *sql.Wind
 
 	partitions := make([]sql.Expression, len(def.PartitionBy))
 	for i, expr := range def.PartitionBy {
-		partitions[i] = b.buildScalar(fromScope, expr)
+		partitions[i] = b.scalarExpr(fromScope, expr)
 	}
 
 	frame := b.NewFrame(fromScope, def.Frame)
@@ -819,38 +819,111 @@ func (b *Builder) analyzeHaving(fromScope, projScope *scope, having *ast.Where) 
 	}, having.Expr)
 }
 
-func (b *Builder) buildInnerProj(outScope, projScope *scope) *scope {
+func (b *Builder) buildInnerProj(outScope *scope) *scope {
+	outScope.node, _ = dfs(b.intern, outScope.node, sql.ColSet{})
+	return outScope
+}
 
-	// todo put aliases in a project append
-	// ignore aggregation columns
-
-	var proj []sql.Expression
-
-	// eval aliases in project scope
-	for _, col := range projScope.cols {
-		switch e := col.scalar.(type) {
-		case *expression.Alias:
-			if !e.Unreferencable() {
-				e.SetId(sql.ColumnId(col.id))
-				proj = append(proj, e)
-			}
+func dfs(intern *interner, n sql.Node, parent sql.ColSet) (sql.Node, sql.ColSet) {
+	var curset sql.ColSet
+	if ne, ok := n.(sql.Expressioner); ok {
+		for _, e := range ne.Expressions() {
+			transform.InspectExpr(e, func(e sql.Expression) bool {
+				switch e := e.(type) {
+				case sql.IdExpression:
+					curset.Add(e.Id())
+				}
+				return false
+			})
 		}
 	}
 
-	//if len(proj) == 0 && !(len(fromScope.cols) == 1 && fromScope.cols[0].id == 0) {
-	//	// remove redundant projection unless it is the single dual table column
-	//	for _, c := range fromScope.cols {
-	//		proj = append(proj, c.scalarGf())
-	//	}
-	//	outScope.node = plan.NewProject(proj, outScope.node)
-	//	return outScope
-	//}
-
-	if len(proj) > 0 {
-		outScope.node = plan.NewProjectAppend(outScope.node, proj)
+	parentPlus := parent.Union(curset)
+	var childSet sql.ColSet
+	var newChildren []sql.Node
+	for _, n := range n.Children() {
+		newN, cSet := dfs(intern, n, parentPlus)
+		childSet.UnionWith(cSet)
+		newChildren = append(newChildren, newN)
 	}
 
-	return outScope
+	retSet := curset.Union(childSet)
+
+	if len(newChildren) > 1 || len(newChildren) == 0 {
+		ret, _ := n.WithChildren(newChildren...)
+		return ret, retSet
+	}
+
+	var mat []sql.Expression
+	curset.Difference(childSet).ForEach(func(col sql.ColumnId) {
+		e := intern.colIdToSqlExpr[col]
+		if e == nil {
+			print()
+		}
+		mat = append(mat, e)
+	})
+
+	if len(mat) == 0 {
+		ret, _ := n.WithChildren(newChildren[0])
+		return ret, retSet
+	}
+
+	// list of expressions needed
+	// recursively expand
+	// 3 aliases -> expand to arith and lower should be converts
+	// dedup converts
+	var levels [][]sql.Expression
+	for len(mat) > 0 {
+		var newMat []sql.Expression
+		for i, e := range mat {
+			var lower []sql.Expression
+			e, lower, curset = expandBindExpr(intern, e, curset)
+			newMat = append(newMat, lower...)
+			mat[i] = e
+		}
+		levels = append(levels, mat)
+		mat = newMat
+	}
+
+	ret := newChildren[0]
+	for i := len(levels) - 1; i >= 0; i-- {
+		ret = plan.NewProjectAppend(ret, levels[i])
+	}
+	ret, _ = n.WithChildren(ret)
+	return ret, retSet
+}
+
+func expandBindExpr(intern *interner, mat sql.Expression, curset sql.ColSet) (sql.Expression, []sql.Expression, sql.ColSet) {
+	var lower []sql.Expression
+	ret, _, _ := transform.Expr(mat, func(e sql.Expression) (sql.Expression, transform.TreeIdentity, error) {
+		switch e := e.(type) {
+		case bindExpr:
+			sqlExpr := intern.colIdToSqlExpr[e.id]
+			switch sqlExpr.(type) {
+			case *expression.GetField:
+			case *expression.Literal:
+			default:
+				if curset.Contains(e.id) {
+					return e.ToGf(), transform.NewTree, nil
+				}
+				if intern.uses[e.id] > 1 {
+					a := expression.NewAlias(e.String(), sqlExpr)
+					a.SetId(e.id)
+					lower = append(lower, a)
+					curset.Add(e.id)
+					return e.ToGf(), transform.NewTree, nil
+				}
+			}
+			var expSql sql.Expression
+			var newLower []sql.Expression
+			expSql, newLower, curset = expandBindExpr(intern, sqlExpr, curset)
+			lower = append(lower, newLower...)
+			return expSql, transform.NewTree, nil
+		default:
+		}
+		return e, transform.SameTree, nil
+	})
+	return ret, lower, curset
 }
 
 // getMatchingCol returns the column in cols that matches the name, if it exists
@@ -921,7 +994,7 @@ func (b *Builder) buildHaving(fromScope, projScope, outScope *scope, having *ast
 	}
 
 	havingScope.groupBy = fromScope.groupBy
-	h := b.buildScalar(havingScope, having.Expr)
+	h := b.scalarExpr(havingScope, having.Expr)
 	outScope.node = plan.NewHaving(h, outScope.node)
 	return
 }

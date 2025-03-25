@@ -90,6 +90,8 @@ func (b *Builder) buildSelect(inScope *scope, s *ast.Select) (outScope *scope) {
 		outScope = b.buildAggregation(fromScope, projScope, groupingCols)
 	} else if fromScope.windowFuncs != nil {
 		outScope = b.buildWindow(fromScope, projScope)
+	} else {
+		outScope = fromScope
 	}
 	//} else {
 	//	outScope = b.buildInnerProj(fromScope, projScope)
@@ -104,13 +106,13 @@ func (b *Builder) buildSelect(inScope *scope, s *ast.Select) (outScope *scope) {
 
 	b.buildOrderBy(outScope, orderByScope)
 
-	// synthetic projections for aliases that still need to
-	// be pushed below first use
-	outScope = b.buildInnerProj(outScope, projScope)
-
 	// Last level projection restricts outputs to target projections.
 	b.buildProjection(outScope, projScope)
 	outScope = projScope
+
+	// synthetic projections for aliases that still need to
+	// be pushed below first use
+	outScope = b.buildInnerProj(outScope)
 
 	if err := b.buildDistinct(outScope, s.QueryOpts.Distinct); err != nil {
 		b.handleErr(err)
