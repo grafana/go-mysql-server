@@ -128,7 +128,7 @@ func (c *comparison) Compare(ctx *sql.Context, row sql.Row) (int, error) {
 	}
 
 	if types.TypesEqual(c.Left().Type(), c.Right().Type()) {
-		return c.Left().Type().Compare(left, right)
+		return c.Left().Type().Compare(ctx, left, right)
 	}
 
 	// ENUM, SET, and TIME must be excluded when doing comparisons, as they're too restrictive to use as a comparison
@@ -174,7 +174,7 @@ func (c *comparison) Compare(ctx *sql.Context, row sql.Row) (int, error) {
 		compareType = types.MustCreateString(stringCompareType.Type(), stringCompareType.Length(), collationPreference)
 	}
 
-	return compareType.Compare(left, right)
+	return compareType.Compare(ctx, left, right)
 }
 
 func (c *comparison) evalLeftAndRight(ctx *sql.Context, row sql.Row) (interface{}, interface{}, error) {
@@ -425,7 +425,7 @@ func (e *NullSafeEquals) Compare(ctx *sql.Context, row sql.Row) (int, error) {
 	}
 
 	if types.TypesEqual(e.Left().Type(), e.Right().Type()) {
-		return e.Left().Type().Compare(left, right)
+		return e.Left().Type().Compare(ctx, left, right)
 	}
 
 	var compareType sql.Type
@@ -434,7 +434,7 @@ func (e *NullSafeEquals) Compare(ctx *sql.Context, row sql.Row) (int, error) {
 		return 0, err
 	}
 
-	return compareType.Compare(left, right)
+	return compareType.Compare(ctx, left, right)
 }
 
 // Eval implements the Expression interface.
