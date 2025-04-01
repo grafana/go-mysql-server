@@ -243,7 +243,7 @@ func (t StringType) Length() int64 {
 }
 
 // Compare implements Type interface.
-func (t StringType) Compare(s context.Context, a interface{}, b interface{}) (int, error) {
+func (t StringType) Compare(ctx context.Context, a interface{}, b interface{}) (int, error) {
 	if hasNulls, res := CompareNulls(a, b); hasNulls {
 		return res, nil
 	}
