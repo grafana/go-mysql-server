@@ -306,11 +306,13 @@ func (t StringType) Compare(a interface{}, b interface{}) (int, error) {
 
 // Convert implements Type interface.
 func (t StringType) Convert(v interface{}) (interface{}, sql.ConvertInRange, error) {
+	// TODO: Add context parameter to Convert
+	ctx := context.Background()
 	if v == nil {
 		return nil, sql.InRange, nil
 	}
 
-	val, err := ConvertToString(v, t, nil)
+	val, err := ConvertToString(ctx, v, t, nil)
 	if err != nil {
 		return nil, sql.OutOfRange, err
 	}
@@ -321,12 +323,12 @@ func (t StringType) Convert(v interface{}) (interface{}, sql.ConvertInRange, err
 	return val, sql.InRange, nil
 }
 
-func ConvertToString(v interface{}, t sql.StringType, dest []byte) (string, error) {
-	ret, err := ConvertToBytes(v, t, dest)
+func ConvertToString(ctx context.Context, v interface{}, t sql.StringType, dest []byte) (string, error) {
+	ret, err := ConvertToBytes(ctx, v, t, dest)
 	return string(ret), err
 }
 
-func ConvertToBytes(v interface{}, t sql.StringType, dest []byte) ([]byte, error) {
+func ConvertToBytes(ctx context.Context, v interface{}, t sql.StringType, dest []byte) ([]byte, error) {
 	var val []byte
 	start := len(dest)
 	switch s := v.(type) {
@@ -524,7 +526,7 @@ func (t StringType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.
 	start := len(dest)
 	var val []byte
 	if IsBinaryType(t) {
-		val, err = ConvertToBytes(v, t, dest)
+		val, err = ConvertToBytes(ctx, v, t, dest)
 		if err != nil {
 			return sqltypes.Value{}, err
 		}
@@ -571,7 +573,7 @@ func (t StringType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.
 				valueBytes = valueBytes[start+1:]
 			}
 		default:
-			valueBytes, err = ConvertToBytes(v, t, dest)
+			valueBytes, err = ConvertToBytes(ctx, v, t, dest)
 		}
 		if t.baseType == sqltypes.Binary {
 			val = append(val, bytes.Repeat([]byte{0}, int(t.maxCharLength)-len(val))...)
