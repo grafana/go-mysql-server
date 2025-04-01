@@ -435,7 +435,7 @@ func TestQueryWithIndexCheck(t *testing.T, ctx *sql.Context, e QueryEngine, harn
 	require.NoError(err, "Unexpected error for query %s: %s", q, err)
 
 	if expected != nil {
-		CheckResults(t, harness, expected, expectedCols, sch, rows, q, e)
+		CheckResults(ctx, t, harness, expected, expectedCols, sch, rows, q, e)
 	}
 
 	require.Equal(
@@ -494,7 +494,7 @@ func TestPreparedQueryWithContext(t *testing.T, ctx *sql.Context, e QueryEngine,
 
 	if expected != nil {
 		// TODO fix expected cols for prepared?
-		CheckResults(t, h, expected, expectedCols, sch, rows, q, e)
+		CheckResults(ctx, t, h, expected, expectedCols, sch, rows, q, e)
 	}
 
 	require.Equal(0, ctx.Memory.NumCaches())
@@ -655,7 +655,7 @@ type CustomValueValidator interface {
 // toSQL converts the given expected value into appropriate type of given column.
 // |isZeroTime| is true if the query is any `SHOW` statement, except for `SHOW EVENTS`.
 // This is set earlier in `checkResult()` method.
-func toSQL(c *sql.Column, expected any, isZeroTime bool) (any, error) {
+func toSQL(ctx *sql.Context, c *sql.Column, expected any, isZeroTime bool) (any, error) {
 	_, isTime := expected.(time.Time)
 	_, isStr := expected.(string)
 	// cases where we don't want the result value to be converted
@@ -759,7 +759,7 @@ func checkResults(
 			} else {
 				// this attempts to do what `rowToSQL()` method in `handler.go` on expected row
 				// because over the wire values gets converted to SQL values depending on the column types.
-				convertedExpected, err := toSQL(sch[j], widenedExpected[i][j], setZeroTime)
+				convertedExpected, err := toSQL(ctx, sch[j], widenedExpected[i][j], setZeroTime)
 				require.NoError(t, err)
 				widenedExpected[i][j] = convertedExpected
 			}
@@ -1072,7 +1072,7 @@ func AssertWarningAndTestQuery(
 	}
 
 	if !skipResultsCheck {
-		CheckResults(t, harness, expected, expectedCols, sch, rows, query, e)
+		CheckResults(ctx, t, harness, expected, expectedCols, sch, rows, query, e)
 	}
 	validateEngine(t, ctx, harness, e)
 }
