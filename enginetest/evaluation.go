@@ -392,7 +392,7 @@ func TestQueryWithContext(
 	require.NoError(err, "Unexpected error for query %s: %s", q, err)
 
 	if expected != nil {
-		CheckResults(t, harness, expected, expectedCols, sch, rows, q, e)
+		CheckResults(ctx, t, harness, expected, expectedCols, sch, rows, q, e)
 	}
 
 	require.Equal(
@@ -503,6 +503,7 @@ func TestPreparedQueryWithContext(t *testing.T, ctx *sql.Context, e QueryEngine,
 
 // CheckResults compares the
 func CheckResults(
+	ctx *sql.Context,
 	t *testing.T,
 	h Harness,
 	expected []sql.Row,
@@ -515,7 +516,7 @@ func CheckResults(
 	if reh, ok := h.(ResultEvaluationHarness); ok {
 		reh.EvaluateQueryResults(t, expected, expectedCols, sch, rows, q)
 	} else {
-		checkResults(t, expected, expectedCols, sch, rows, q, e)
+		checkResults(ctx, t, expected, expectedCols, sch, rows, q, e)
 	}
 }
 
@@ -671,6 +672,7 @@ func toSQL(ctx *sql.Context, c *sql.Column, expected any, isZeroTime bool) (any,
 // checkResults is the default implementation for checking the results of a test query assertion for harnesses that
 // don't implement ResultEvaluationHarness. All numerical values are widened to their widest type before comparison.
 func checkResults(
+	ctx *sql.Context,
 	t *testing.T,
 	expected []sql.Row,
 	expectedCols []*sql.Column,
