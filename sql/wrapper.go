@@ -58,8 +58,24 @@ type Wrapper[T any] interface {
 	Unwrap(ctx context.Context) (result T, err error)
 }
 
-type StringWrapper = Wrapper[string]
-type BytesWrapper = Wrapper[[]byte]
+// SerializableWrapper is an interface for types that can be converted to a sequence of bytes.
+// Depending on the use case, it may be more efficient to serialize the value than to unwrap it.
+type SerializableWrapper interface {
+	// Serialize converts the underlying value to a sequence of bytes.
+	// If |dest| is not nil and has sufficient capacity, the bytes will be appended to it
+	// instead of allocating a new slice. In either case, val contains the serialized value.
+	Serialize(ctx context.Context, dest []byte) (val []byte, err error)
+}
+
+type StringWrapper interface {
+	Wrapper[string]
+	SerializableWrapper
+}
+
+type BytesWrapper interface {
+	Wrapper[[]byte]
+	SerializableWrapper
+}
 
 // UnwrapAny takes a possibly-wrapped value and unwraps it. If the input isn't a wrapper, the input is returned unmodified.
 func UnwrapAny(ctx context.Context, v interface{}) (result interface{}, err error) {
