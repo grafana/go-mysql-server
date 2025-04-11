@@ -215,7 +215,7 @@ type SessionOption func()
 // This is an optional interface which integrators can choose to implement
 // if they want those callbacks.
 type LifecycleAwareSession interface {
-	CommandBegin(ctx context.CancelFunc) error
+	CommandBegin() error
 	CommandEnd()
 	SessionEnd()
 }
@@ -726,9 +726,9 @@ const (
 )
 
 // Helper function to call CommandBegin on a LifecycleAwareSession, or do nothing.
-func SessionCommandBegin(s Session, cancel context.CancelFunc) error {
+func SessionCommandBegin(s Session) error {
 	if cur, ok := s.(LifecycleAwareSession); ok {
-		return cur.CommandBegin(cancel)
+		return cur.CommandBegin()
 	}
 	return nil
 }
