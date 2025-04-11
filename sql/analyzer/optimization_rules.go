@@ -17,6 +17,8 @@ package analyzer
 import (
 	"strings"
 
+	"github.com/dolthub/go-mysql-server/memory"
+
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/expression"
 	"github.com/dolthub/go-mysql-server/sql/plan"
@@ -43,7 +45,9 @@ func eraseProjection(ctx *sql.Context, a *Analyzer, node sql.Node, scope *plan.S
 	return transform.Node(node, func(node sql.Node) (sql.Node, transform.TreeIdentity, error) {
 		project, ok := node.(*plan.Project)
 		if ok {
-			if project.Schema().CaseSensitiveEquals(project.Child.Schema()) {
+			projSch := project.Schema()
+			childSch := project.Child.Schema()
+			if projSch.CaseSensitiveEquals(childSch) && !childSch.Equals(memory.DualTableSchema.Schema) {
 				a.Log("project erased")
 				return project.Child, transform.NewTree, nil
 			}
@@ -242,11 +246,11 @@ func simplifyFilters(ctx *sql.Context, a *Analyzer, node sql.Node, scope *plan.S
 					return e.RightChild, transform.NewTree, nil
 				}
 
-				if isFalse(e.LeftChild) {
+				if isFalse(e.LeftChild) && types.IsBoolean(e.RightChild.Type()) {
 					return e.RightChild, transform.NewTree, nil
 				}
 
-				if isFalse(e.RightChild) {
+				if isFalse(e.RightChild) && types.IsBoolean(e.LeftChild.Type()) {
 					return e.LeftChild, transform.NewTree, nil
 				}
 
@@ -260,11 +264,11 @@ func simplifyFilters(ctx *sql.Context, a *Analyzer, node sql.Node, scope *plan.S
 					return e.RightChild, transform.NewTree, nil
 				}
 
-				if isTrue(e.LeftChild) {
+				if isTrue(e.LeftChild) && types.IsBoolean(e.RightChild.Type()) {
 					return e.RightChild, transform.NewTree, nil
 				}
 
-				if isTrue(e.RightChild) {
+				if isTrue(e.RightChild) && types.IsBoolean(e.LeftChild.Type()) {
 					return e.LeftChild, transform.NewTree, nil
 				}
 
@@ -427,7 +431,9 @@ func pushNotFiltersHelper(e sql.Expression) (sql.Expression, error) {
 	// NOT(NOT(c))=>c
 	if not, _ := e.(*expression.Not); not != nil {
 		if f, _ := not.Child.(*expression.Not); f != nil {
-			return pushNotFiltersHelper(f.Child)
+			if types.IsBoolean(f.Child.Type()) {
+				return pushNotFiltersHelper(f.Child)
+			}
 		}
 	}
 

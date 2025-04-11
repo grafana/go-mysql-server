@@ -311,6 +311,72 @@ var TriggerTests = []ScriptTest{
 		},
 	},
 	{
+		Name: "issue #9039: trigger insert subquery error",
+		SetUpScript: []string{
+			"create table a (x int primary key, y int default 1, z int)",
+			"create table b (x int primary key)",
+			"create table c (x int primary key)",
+			"create table d (x int primary key)",
+			"insert into b values (1), (2)",
+			"insert into d values (1), (2)",
+			`
+create trigger insert_into_a
+after insert on a
+for each row replace into c
+select * from d join (select * from b where new.x = b.x) as e using (x)
+where d.x = new.x`,
+			"insert into a (x,z) values (2,2)",
+		},
+		Query: "select x from c order by 1",
+		Expected: []sql.Row{
+			{2},
+		},
+	},
+	{
+		Name: "issue #9039: trigger insert join index error",
+		SetUpScript: []string{
+			"create table a (x int primary key, y int default 1, z int)",
+			"create table b (x int primary key)",
+			"create table c (x int primary key)",
+			"create table d (x int primary key)",
+			"insert into b values (1), (2)",
+			"insert into d values (1), (2)",
+			`
+create trigger insert_into_a
+after insert on a
+for each row replace into c
+select * from d join b using (x)
+where d.x = new.x`,
+			"insert into a (x,z) values (2,2)",
+		},
+		Query: "select x from c order by 1",
+		Expected: []sql.Row{
+			{2},
+		},
+	},
+	{
+		Name: "issue #9039: trigger insert projection index error",
+		SetUpScript: []string{
+			"create table a (x int primary key, y int default 1, z int)",
+			"create table b (x int primary key)",
+			"create table c (x int primary key, y tinyint)",
+			"create table d (x int primary key)",
+			"insert into b values (1), (2)",
+			"insert into d values (1), (2)",
+			`
+create trigger insert_into_a
+after insert on a
+for each row replace into c
+select d.x+2, 0 from d join b using (x)
+where d.x = new.x`,
+			"insert into a (x,z) values (2,2)",
+		},
+		Query: "select x, y from c order by 1",
+		Expected: []sql.Row{
+			{4, 0},
+		},
+	},
+	{
 		Name: "trigger before insert, alter inserted value",
 		SetUpScript: []string{
 			"create table a (x int primary key)",
@@ -502,6 +568,91 @@ var TriggerTests = []ScriptTest{
 				Query: "SELECT * FROM testStr",
 				Expected: []sql.Row{
 					{"joe's:1", "jill's:2", "stan\"s:3"},
+				},
+			},
+		},
+	},
+	{
+		Name: "insert trigger with missing column default value",
+		SetUpScript: []string{
+			"CREATE TABLE t (i INT PRIMARY KEY, j INT NOT NULL);",
+			`
+CREATE TRIGGER trig BEFORE INSERT ON t 
+FOR EACH ROW
+BEGIN
+    SET new.j = 10;
+END;`,
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: "INSERT INTO t (i) VALUES (1);",
+				Expected: []sql.Row{
+					{types.OkResult{RowsAffected: 1}},
+				},
+			},
+			{
+				Query: "INSERT INTO t (i, j) VALUES (2, null);",
+				Expected: []sql.Row{
+					{types.OkResult{RowsAffected: 1}},
+				},
+			},
+			{
+				Query: "SELECT * FROM t;",
+				Expected: []sql.Row{
+					{1, 10},
+					{2, 10},
+				},
+			},
+		},
+	},
+	{
+		Name: "not null column with trigger that sets null should error",
+		SetUpScript: []string{
+			"CREATE TABLE t (i INT PRIMARY KEY, j INT NOT NULL);",
+			`
+CREATE TRIGGER trig BEFORE INSERT ON t 
+FOR EACH ROW
+BEGIN
+    SET new.j = null;
+END;`,
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:       "INSERT INTO t (i) VALUES (1);",
+				ExpectedErr: sql.ErrInsertIntoNonNullableDefaultNullColumn,
+			},
+			{
+				Query:       "INSERT INTO t (i, j) VALUES (1, 2);",
+				ExpectedErr: sql.ErrInsertIntoNonNullableProvidedNull,
+			},
+		},
+	},
+	{
+		Name: "not null column with before insert trigger should error",
+		SetUpScript: []string{
+			"CREATE TABLE t (i INT PRIMARY KEY, j INT NOT NULL);",
+			`
+CREATE TRIGGER trig BEFORE INSERT ON t 
+FOR EACH ROW
+BEGIN
+    SET new.i = 10 * new.i;
+END;`,
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:       "INSERT INTO t (i) VALUES (1);",
+				ExpectedErr: sql.ErrInsertIntoNonNullableDefaultNullColumn,
+			},
+			{
+				Query: "INSERT INTO t (i, j) VALUES (1, 2);",
+				Expected: []sql.Row{
+					{types.NewOkResult(1)},
+				},
+			},
+			{
+				Query: "SELECT * FROM t;",
+				Expected: []sql.Row{
+					{10, 2},
 				},
 			},
 		},
@@ -843,6 +994,37 @@ END;`,
 			{
 				Query:    "select * from test;",
 				Expected: []sql.Row{{-2}, {-2}},
+			},
+		},
+	},
+	{
+		Name: "trigger before update with table alias",
+		SetUpScript: []string{
+			"CREATE TABLE test (i INT, j INT);",
+			"INSERT INTO test VALUES (1, 1);",
+			`
+CREATE TRIGGER before_test_update BEFORE UPDATE ON test
+FOR EACH ROW
+BEGIN
+	SET new.j = new.i * 100;
+END;`,
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:       "update test t set test.i = 2 where test.i = 1;",
+				ExpectedErr: sql.ErrTableNotFound,
+			},
+			{
+				Query: "update test t set t.i = 2 where t.i = 1;",
+				Expected: []sql.Row{
+					{types.OkResult{RowsAffected: 1, Info: plan.UpdateInfo{Matched: 1, Updated: 1}}},
+				},
+			},
+			{
+				Query: "select * from test;",
+				Expected: []sql.Row{
+					{2, 200},
+				},
 			},
 		},
 	},
@@ -2507,7 +2689,11 @@ end;`,
 			},
 			{
 				Query:    "INSERT INTO `film` VALUES (3,'ADAPTATION HOLES','An Astounding Reflection in A Baloon Factory'),(4,'AFFAIR PREJUDICE','A Fanciful Documentary in A Shark Tank')",
-				Expected: []sql.Row{{types.OkResult{RowsAffected: 2, InsertID: 0}}},
+				Expected: []sql.Row{{types.OkResult{RowsAffected: 2, InsertID: 3}}},
+			},
+			{
+				Query:    "SELECT last_insert_id();",
+				Expected: []sql.Row{{uint64(0)}},
 			},
 			{
 				Query:    "SELECT COUNT(*) FROM film",
@@ -2568,7 +2754,11 @@ INSERT INTO t0 (v1, v2) VALUES (i, s); END;`,
 			{
 				SkipResultCheckOnServerEngine: true, // call depends on stored procedure stmt for whether to use 'query' or 'exec' from go sql driver.
 				Query:                         "CALL add_entry(4, 'aaa');",
-				Expected:                      []sql.Row{{types.OkResult{RowsAffected: 1, InsertID: 1}}},
+				Expected:                      []sql.Row{{types.OkResult{RowsAffected: 1, InsertID: 3}}},
+			},
+			{
+				Query:    "SELECT last_insert_id();",
+				Expected: []sql.Row{{uint64(1)}},
 			},
 			{
 				Query:    "SELECT * FROM t0;",

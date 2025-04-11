@@ -133,7 +133,13 @@ func (r *RegexpSubstr) WithChildren(children ...sql.Expression) (sql.Expression,
 	if len(children) != required {
 		return nil, sql.ErrInvalidChildrenNumber.New(r, len(children), required)
 	}
-	return NewRegexpSubstr(children...)
+
+	// Copy over the regex instance, in case it has already been set to avoid leaking it.
+	substr, err := NewRegexpSubstr(children...)
+	if r.re != nil && substr != nil {
+		substr.(*RegexpSubstr).re = r.re
+	}
+	return substr, err
 }
 
 // String implements the sql.Expression interface.
@@ -188,7 +194,7 @@ func (r *RegexpSubstr) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) 
 	if text == nil {
 		return nil, nil
 	}
-	text, _, err = types.LongText.Convert(text)
+	text, _, err = types.LongText.Convert(ctx, text)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +206,7 @@ func (r *RegexpSubstr) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) 
 	if pos == nil {
 		return nil, nil
 	}
-	pos, _, err = types.Int32.Convert(pos)
+	pos, _, err = types.Int32.Convert(ctx, pos)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +218,7 @@ func (r *RegexpSubstr) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) 
 	if occurrence == nil {
 		return nil, nil
 	}
-	occurrence, _, err = types.Int32.Convert(occurrence)
+	occurrence, _, err = types.Int32.Convert(ctx, occurrence)
 	if err != nil {
 		return nil, err
 	}

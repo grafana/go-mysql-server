@@ -15,6 +15,7 @@
 package function
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -133,7 +134,7 @@ func (d *DateAdd) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 	}
 
 	var dateVal interface{}
-	dateVal, _, err = types.DatetimeMaxPrecision.Convert(date)
+	dateVal, _, err = types.DatetimeMaxPrecision.Convert(ctx, date)
 	if err != nil {
 		ctx.Warn(1292, err.Error())
 		return nil, nil
@@ -164,7 +165,7 @@ func (d *DateAdd) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 		}
 	}
 
-	ret, _, err := resType.Convert(res)
+	ret, _, err := resType.Convert(ctx, res)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +281,7 @@ func (d *DateSub) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 	}
 
 	var dateVal interface{}
-	dateVal, _, err = types.DatetimeMaxPrecision.Convert(date)
+	dateVal, _, err = types.DatetimeMaxPrecision.Convert(ctx, date)
 	if err != nil {
 		ctx.Warn(1292, err.Error())
 		return nil, nil
@@ -311,7 +312,7 @@ func (d *DateSub) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 		}
 	}
 
-	ret, _, err := resType.Convert(res)
+	ret, _, err := resType.Convert(ctx, res)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +367,7 @@ func (t *DatetimeConversion) Eval(ctx *sql.Context, r sql.Row) (interface{}, err
 	if err != nil {
 		return nil, err
 	}
-	ret, _, err := types.DatetimeMaxPrecision.Convert(e)
+	ret, _, err := types.DatetimeMaxPrecision.Convert(ctx, e)
 	return ret, err
 }
 
@@ -405,19 +406,18 @@ var _ sql.CollationCoercible = (*UnixTimestamp)(nil)
 
 const MaxUnixTimeMicroSecs = 32536771199999999
 
-// noEval returns true if the expression contains an expression that cannot be evaluated without sql.Context or sql.Row.
-func noEval(expr sql.Expression) bool {
-	var hasBadExpr bool
+// canEval returns if the expression contains an expression that cannot be evaluated without sql.Context or sql.Row.
+func canEval(expr sql.Expression) bool {
+	evaluable := true
 	transform.InspectExpr(expr, func(e sql.Expression) bool {
 		switch e.(type) {
-		case *expression.GetField:
-			hasBadExpr = true
-		case *ConvertTz:
-			hasBadExpr = true
+		case *expression.GetField, *ConvertTz:
+			evaluable = false
+			return true
 		}
-		return hasBadExpr
+		return false
 	})
-	return hasBadExpr
+	return evaluable
 }
 
 func getNowExpr(expr sql.Expression) *Now {
@@ -436,7 +436,7 @@ func evalNowType(now *Now) sql.Type {
 	if now.prec == nil {
 		return types.Int64
 	}
-	if noEval(now.prec) {
+	if !canEval(now.prec) {
 		return types.MustCreateDecimalType(19, 6)
 	}
 	prec, pErr := now.prec.Eval(nil, nil)
@@ -455,6 +455,8 @@ func evalNowType(now *Now) sql.Type {
 }
 
 func NewUnixTimestamp(args ...sql.Expression) (sql.Expression, error) {
+	// TODO: Add context.parameter
+	ctx := context.Background()
 	if len(args) > 1 {
 		return nil, sql.ErrInvalidArgumentNumber.New("UNIX_TIMESTAMP", 1, len(args))
 	}
@@ -463,7 +465,10 @@ func NewUnixTimestamp(args ...sql.Expression) (sql.Expression, error) {
 	}
 
 	arg := args[0]
-	if noEval(arg) {
+	if dtType, isDtType := arg.Type().(sql.DatetimeType); isDtType {
+		return &UnixTimestamp{Date: arg, typ: types.MustCreateDecimalType(19, uint8(dtType.Precision()))}, nil
+	}
+	if !canEval(arg) {
 		return &UnixTimestamp{Date: arg, typ: types.MustCreateDecimalType(19, 6)}, nil
 	}
 	if now := getNowExpr(arg); now != nil {
@@ -476,7 +481,27 @@ func NewUnixTimestamp(args ...sql.Expression) (sql.Expression, error) {
 	if err != nil || date == nil {
 		return &UnixTimestamp{Date: arg}, nil
 	}
-	date, _, err = types.DatetimeMaxPrecision.Convert(date)
+	// special case: text types with fractional seconds preserve scale
+	// e.g. '2000-01-02 12:34:56.000' -> scale 3
+	if types.IsText(arg.Type()) {
+		dateStr := date.(string)
+		idx := strings.Index(dateStr, ".")
+		if idx != -1 {
+			dateStr = strings.TrimSpace(dateStr[idx:])
+			scale := uint8(len(dateStr) - 1)
+			if scale > 0 {
+				if scale > 6 {
+					scale = 6
+				}
+				typ, tErr := types.CreateDecimalType(19, scale)
+				if tErr != nil {
+					return nil, tErr
+				}
+				return &UnixTimestamp{Date: arg, typ: typ}, nil
+			}
+		}
+	}
+	date, _, err = types.DatetimeMaxPrecision.Convert(ctx, date)
 	if err != nil {
 		return &UnixTimestamp{Date: arg}, nil
 	}
@@ -553,7 +578,7 @@ func (ut *UnixTimestamp) Eval(ctx *sql.Context, row sql.Row) (interface{}, error
 		return nil, nil
 	}
 
-	date, _, err = types.DatetimeMaxPrecision.Convert(date)
+	date, _, err = types.DatetimeMaxPrecision.Convert(ctx, date)
 	if err != nil {
 		// If we aren't able to convert the value to a date, return 0 and set
 		// a warning to match MySQL's behavior
@@ -653,7 +678,7 @@ func (r *FromUnixtime) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) 
 		return nil, nil
 	}
 
-	n, _, err := types.Int64.Convert(val)
+	n, _, err := types.Int64.Convert(ctx, val)
 	if err != nil {
 		return nil, err
 	}

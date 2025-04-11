@@ -158,7 +158,7 @@ func replanJoin(ctx *sql.Context, n *plan.JoinNode, a *Analyzer, scope *plan.Sco
 
 	qFlags.Set(sql.QFlagInnerJoin)
 
-	err = addIndexScans(m)
+	err = addIndexScans(ctx, m)
 	if err != nil {
 		return nil, err
 	}
@@ -170,12 +170,12 @@ func replanJoin(ctx *sql.Context, n *plan.JoinNode, a *Analyzer, scope *plan.Sco
 	if err != nil {
 		return nil, err
 	}
-	err = addRightSemiJoins(m)
+	err = addRightSemiJoins(ctx, m)
 	if err != nil {
 		return nil, err
 	}
 
-	err = addLookupJoins(m)
+	err = addLookupJoins(ctx, m)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +185,7 @@ func replanJoin(ctx *sql.Context, n *plan.JoinNode, a *Analyzer, scope *plan.Sco
 		return nil, err
 	}
 
-	memo.CardMemoGroups(m.Root())
+	memo.CardMemoGroups(ctx, m.Root())
 
 	err = addCrossHashJoins(m)
 	if err != nil {
@@ -200,6 +200,7 @@ func replanJoin(ctx *sql.Context, n *plan.JoinNode, a *Analyzer, scope *plan.Sco
 		return nil, err
 	}
 
+	m.SetDefaultHints()
 	hints := memo.ExtractJoinHint(n)
 	for _, h := range hints {
 		// this should probably happen earlier, but the root is not
@@ -215,6 +216,9 @@ func replanJoin(ctx *sql.Context, n *plan.JoinNode, a *Analyzer, scope *plan.Sco
 	if a.Verbose && a.Debug {
 		a.Log(m.String())
 	}
+	if scope != nil {
+		scope.JoinTrees = append(scope.JoinTrees, m.String())
+	}
 
 	return m.BestRootPlan(ctx)
 }
@@ -226,7 +230,7 @@ func replanJoin(ctx *sql.Context, n *plan.JoinNode, a *Analyzer, scope *plan.Sco
 // ii) with an index that matches a prefix of the indexable relation's free
 // attributes in the join filter. Costing is responsible for choosing the most
 // appropriate execution plan among options added to an expression group.
-func addLookupJoins(m *memo.Memo) error {
+func addLookupJoins(ctx *sql.Context, m *memo.Memo) error {
 	return memo.DfsRel(m.Root(), func(e memo.RelExpr) error {
 		var right *memo.ExprGroup
 		var join *memo.JoinBase
@@ -284,7 +288,7 @@ func addLookupJoins(m *memo.Memo) error {
 				for _, idx := range indexes {
 					keyExprs, _, nullmask := keyExprsForIndex(tableId, idx.Cols(), append(filters, extraFilters...))
 					if keyExprs != nil {
-						ita, err := plan.NewIndexedAccessForTableNode(rt, plan.NewLookupBuilder(idx.SqlIdx(), keyExprs, nullmask))
+						ita, err := plan.NewIndexedAccessForTableNode(ctx, rt, plan.NewLookupBuilder(idx.SqlIdx(), keyExprs, nullmask))
 						if err != nil {
 							return err
 						}
@@ -310,7 +314,7 @@ func addLookupJoins(m *memo.Memo) error {
 			if keyExprs == nil {
 				continue
 			}
-			ita, err := plan.NewIndexedAccessForTableNode(rt, plan.NewLookupBuilder(idx.SqlIdx(), keyExprs, nullmask))
+			ita, err := plan.NewIndexedAccessForTableNode(ctx, rt, plan.NewLookupBuilder(idx.SqlIdx(), keyExprs, nullmask))
 			if err != nil {
 				return err
 			}
@@ -605,7 +609,7 @@ func convertAntiToLeftJoin(m *memo.Memo) error {
 
 // addRightSemiJoins allows for a reversed semiJoin operator when
 // the join attributes of the left side are provably unique.
-func addRightSemiJoins(m *memo.Memo) error {
+func addRightSemiJoins(ctx *sql.Context, m *memo.Memo) error {
 	return memo.DfsRel(m.Root(), func(e memo.RelExpr) error {
 		semi, ok := e.(*memo.SemiJoin)
 		if !ok {
@@ -665,7 +669,7 @@ func addRightSemiJoins(m *memo.Memo) error {
 				rGroup.RelProps.Distinct = memo.HashDistinctOp
 			}
 
-			ita, err := plan.NewIndexedAccessForTableNode(leftRt, plan.NewLookupBuilder(idx.SqlIdx(), keyExprs, nullmask))
+			ita, err := plan.NewIndexedAccessForTableNode(ctx, leftRt, plan.NewLookupBuilder(idx.SqlIdx(), keyExprs, nullmask))
 			if err != nil {
 				return err
 			}
@@ -1319,7 +1323,7 @@ func makeIndexScan(ctx *sql.Context, statsProv sql.StatsProvider, tab plan.Table
 		j++
 	}
 
-	if !idx.SqlIdx().CanSupport(rang) {
+	if !idx.SqlIdx().CanSupport(ctx, rang) {
 		return nil, false, nil
 	}
 
@@ -1348,7 +1352,7 @@ func makeIndexScan(ctx *sql.Context, statsProv sql.StatsProvider, tab plan.Table
 		return nil, false, fmt.Errorf("expected sql.TableNode, found: %T", n)
 	}
 
-	ret, err := plan.NewStaticIndexedAccessForTableNode(tn, l)
+	ret, err := plan.NewStaticIndexedAccessForTableNode(ctx, tn, l)
 	if err != nil {
 		return nil, false, err
 	}

@@ -112,7 +112,14 @@ func (r *RegexpLike) WithChildren(children ...sql.Expression) (sql.Expression, e
 	if len(children) != required {
 		return nil, sql.ErrInvalidChildrenNumber.New(r, len(children), required)
 	}
-	return NewRegexpLike(children...)
+
+	// Copy over the regex instance, in case it has already been set to avoid leaking it.
+	like, err := NewRegexpLike(children...)
+	if like != nil && r.re != nil {
+		like.(*RegexpLike).re = r.re
+	}
+
+	return like, err
 }
 
 // String implements the sql.Expression interface.
@@ -166,7 +173,7 @@ func (r *RegexpLike) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 	if text == nil {
 		return nil, nil
 	}
-	text, _, err = types.LongText.Convert(text)
+	text, _, err = types.LongText.Convert(ctx, text)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +214,7 @@ func compileRegex(ctx *sql.Context, pattern, text, flags sql.Expression, funcNam
 	if patternVal == nil {
 		return nil, nil
 	}
-	patternVal, _, err = types.LongText.Convert(patternVal)
+	patternVal, _, err = types.LongText.Convert(ctx, patternVal)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +243,7 @@ func compileRegex(ctx *sql.Context, pattern, text, flags sql.Expression, funcNam
 		if f == nil {
 			return nil, nil
 		}
-		f, _, err = types.LongText.Convert(f)
+		f, _, err = types.LongText.Convert(ctx, f)
 		if err != nil {
 			return nil, err
 		}

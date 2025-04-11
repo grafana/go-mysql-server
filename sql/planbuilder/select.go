@@ -107,7 +107,9 @@ func (b *Builder) buildSelect(inScope *scope, s *ast.Select) (outScope *scope) {
 	b.buildProjection(outScope, projScope)
 	outScope = projScope
 
-	b.buildDistinct(outScope, s.QueryOpts.Distinct)
+	if err := b.buildDistinct(outScope, s.QueryOpts.Distinct); err != nil {
+		b.handleErr(err)
+	}
 
 	// OFFSET and LIMIT are last
 	offset := b.buildOffset(outScope, s.Limit)
@@ -178,7 +180,7 @@ func (b *Builder) typeCoerceLiteral(e sql.Expression) sql.Expression {
 	// todo this should be in a module that can generically coerce to a type or type class
 	switch e := e.(type) {
 	case *expression.Literal:
-		val, _, err := types.Int64.Convert(e.Value())
+		val, _, err := types.Int64.Convert(b.ctx, e.Value())
 		if err != nil {
 			err = fmt.Errorf("%s: %w", err.Error(), sql.ErrInvalidTypeForLimit.New(types.Int64, e.Type()))
 		}
@@ -194,11 +196,13 @@ func (b *Builder) typeCoerceLiteral(e sql.Expression) sql.Expression {
 
 // buildDistinct creates a new plan.Distinct node if the query has a DISTINCT option.
 // If the query has both DISTINCT and ALL, an error is returned.
-func (b *Builder) buildDistinct(inScope *scope, distinct bool) {
+func (b *Builder) buildDistinct(inScope *scope, distinct bool) error {
 	if !distinct {
-		return
+		return nil
 	}
-	inScope.node = b.f.buildDistinct(inScope.node)
+	var err error
+	inScope.node, err = b.f.buildDistinct(inScope.node, inScope.refsSubquery)
+	return err
 }
 
 func (b *Builder) currentDb() sql.Database {

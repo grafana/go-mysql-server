@@ -15,6 +15,7 @@
 package queries
 
 import (
+	"math"
 	"time"
 
 	"github.com/dolthub/vitess/go/sqltypes"
@@ -406,7 +407,7 @@ SET entity_test.value = joined.value;`,
 		Assertions: []ScriptTestAssertion{
 			{
 				Query:    "update t join (select 1 from t) as tt set t.k = 30;",
-				Expected: []sql.Row{{newUpdateResult(1, 1)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 1)}},
 			},
 			{
 				Query:    "select * from t;",
@@ -414,7 +415,7 @@ SET entity_test.value = joined.value;`,
 			},
 			{
 				Query:    "update t join (select 1, 2, 3, 4, 5 from t) as tt set t.k = 30;",
-				Expected: []sql.Row{{newUpdateResult(1, 0)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 0)}},
 			},
 			{
 				Query:    "select * from t;",
@@ -432,7 +433,7 @@ SET entity_test.value = joined.value;`,
 		Assertions: []ScriptTestAssertion{
 			{
 				Query:    "update t join (select 1 from t) as tt set t.k = 30;",
-				Expected: []sql.Row{{newUpdateResult(1, 1)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 1)}},
 			},
 			{
 				Query:    "select * from t;",
@@ -440,7 +441,7 @@ SET entity_test.value = joined.value;`,
 			},
 			{
 				Query:    "update t join (select 1, 2, 3, 4, 5 from t) as tt set t.k = 30;",
-				Expected: []sql.Row{{newUpdateResult(1, 0)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 0)}},
 			},
 			{
 				Query:    "select * from t;",
@@ -458,7 +459,7 @@ SET entity_test.value = joined.value;`,
 		Assertions: []ScriptTestAssertion{
 			{
 				Query:    "update t join (select 1 from t) as tt set t.k = 30 where t.i = 1;",
-				Expected: []sql.Row{{newUpdateResult(1, 1)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 1)}},
 			},
 			{
 				Query:    "select * from t;",
@@ -468,15 +469,15 @@ SET entity_test.value = joined.value;`,
 				// TODO: should throw can't update error
 				Skip:     true,
 				Query:    "update t join (select i, j, k from t) as tt set t.k = 30 where t.i = 1;",
-				Expected: []sql.Row{{newUpdateResult(1, 0)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 0)}},
 			},
 			{
 				Query:    "update t join (select 1 from t) as tt set t.k = 30 limit 1;",
-				Expected: []sql.Row{{newUpdateResult(1, 0)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 0)}},
 			},
 			{
 				Query:    "update t join (select 1 from t) as tt set t.k = 30 limit 1 offset 1;",
-				Expected: []sql.Row{{newUpdateResult(0, 0)}},
+				Expected: []sql.Row{{NewUpdateResult(0, 0)}},
 			},
 		},
 	},
@@ -506,7 +507,7 @@ SET entity_test.value = joined.value;`,
 		Assertions: []ScriptTestAssertion{
 			{
 				Query:    "UPDATE test_users JOIN (SELECT 1 FROM test_users) AS tu SET test_users.favorite_number = 42;",
-				Expected: []sql.Row{{newUpdateResult(1, 1)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 1)}},
 			},
 			{
 				Query:    "select * from test_users;",
@@ -514,7 +515,7 @@ SET entity_test.value = joined.value;`,
 			},
 			{
 				Query:    "UPDATE test_users JOIN (SELECT id, 1 FROM test_users) AS tu SET test_users.favorite_number = 420;",
-				Expected: []sql.Row{{newUpdateResult(1, 1)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 1)}},
 			},
 			{
 				Query:    "select * from test_users;",
@@ -522,7 +523,7 @@ SET entity_test.value = joined.value;`,
 			},
 			{
 				Query:    "UPDATE test_users JOIN (SELECT id, 1 FROM test_users) AS tu SET test_users.deleted = 1;",
-				Expected: []sql.Row{{newUpdateResult(1, 1)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 1)}},
 			},
 			{
 				Query:    "select * from test_users;",
@@ -2057,7 +2058,7 @@ CREATE TABLE tab3 (
 			},
 			{
 				Query:    "insert into a (x,y) values (1,1)",
-				Expected: []sql.Row{{types.OkResult{RowsAffected: 1, InsertID: 0}}},
+				Expected: []sql.Row{{types.OkResult{RowsAffected: 1, InsertID: 1}}},
 			},
 			{
 				Query:    "select last_insert_id()",
@@ -2082,7 +2083,7 @@ CREATE TABLE tab3 (
 			},
 			{
 				Query:    "insert into b (x) values (1), (2)",
-				Expected: []sql.Row{{types.OkResult{RowsAffected: 2, InsertID: 3}}},
+				Expected: []sql.Row{{types.OkResult{RowsAffected: 2, InsertID: 0}}},
 			},
 			{
 				// The above query doesn't have an auto increment column, so last_insert_id is unchanged
@@ -2093,7 +2094,7 @@ CREATE TABLE tab3 (
 				Query: "insert into a (x, y) values (-100, 10)",
 				Expected: []sql.Row{{types.OkResult{
 					RowsAffected: 1,
-					InsertID:     3,
+					InsertID:     math.MaxUint64 - 100 + 1,
 				}}},
 			},
 			{
@@ -2105,7 +2106,7 @@ CREATE TABLE tab3 (
 				Query: "insert into a (x, y) values (100, 10)",
 				Expected: []sql.Row{{types.OkResult{
 					RowsAffected: 1,
-					InsertID:     3,
+					InsertID:     100,
 				}}},
 			},
 			{
@@ -2200,7 +2201,7 @@ CREATE TABLE tab3 (
 
 			{
 				Query:    "insert into t(pk) values (10), (default);",
-				Expected: []sql.Row{{types.OkResult{RowsAffected: 2, InsertID: 11}}},
+				Expected: []sql.Row{{types.OkResult{RowsAffected: 2, InsertID: 10}}},
 			},
 			{
 				Query: "select last_insert_id()",
@@ -2224,7 +2225,7 @@ CREATE TABLE tab3 (
 
 			{
 				Query:    "insert into t(pk) values (20), (default), (default);",
-				Expected: []sql.Row{{types.OkResult{RowsAffected: 3, InsertID: 21}}},
+				Expected: []sql.Row{{types.OkResult{RowsAffected: 3, InsertID: 20}}},
 			},
 			{
 				Query: "select last_insert_id()",
@@ -3067,7 +3068,7 @@ CREATE TABLE tab3 (
 			{
 				Query: "SELECT unix_timestamp(timestamp_col), unix_timestamp(datetime_col) from datetime_table",
 				Expected: []sql.Row{
-					{"86400.000000", "57600.000000"},
+					{"86400", "57600"},
 				},
 			},
 		},
@@ -5127,6 +5128,51 @@ CREATE TABLE tab3 (
 			},
 		},
 	},
+	{
+		Dialect: "mysql",
+		Name:    "UNIX_TIMESTAMP function preserves trailing 0s",
+		SetUpScript: []string{
+			"SET time_zone = '+07:00';",
+			"create table dt (dt0 datetime(0), dt1 datetime(1), dt2 datetime(2), dt3 datetime(3), dt4 datetime(4), dt5 datetime(5), dt6 datetime(6));",
+			"insert into dt values ('2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456')",
+			// TODO: time length not supported, so by default we have max precision
+			"create table t (d date, tt time);",
+			"insert into t values ('2020-01-02 12:34:56.123456', '12:34:56.123456');",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: "select unix_timestamp('2001-02-03 12:34:56.10');",
+				Expected: []sql.Row{
+					{"981178496.10"},
+				},
+			},
+			{
+				Query: "select unix_timestamp('2001-02-03 12:34:56.000000');",
+				Expected: []sql.Row{
+					{"981178496.000000"},
+				},
+			},
+			{
+				Query: "select unix_timestamp('2001-02-03 12:34:56.1234567');",
+				Expected: []sql.Row{
+					{"981178496.123457"},
+				},
+			},
+			{
+				Query: "select unix_timestamp(dt0), unix_timestamp(dt1), unix_timestamp(dt2), unix_timestamp(dt3), unix_timestamp(dt4), unix_timestamp(dt5), unix_timestamp(dt6) from dt;",
+				Expected: []sql.Row{
+					{"1577943296", "1577943296.1", "1577943296.12", "1577943296.123", "1577943296.1235", "1577943296.12346", "1577943296.123456"},
+				},
+			},
+			{
+				Query: "select unix_timestamp(d), substring(cast(unix_timestamp(tt) as char(128)), -6) from t;",
+				Expected: []sql.Row{
+					{"1577898000", "123456"},
+				},
+			},
+		},
+	},
+
 	{
 		Name: "Querying existing view that references non-existing table",
 		SetUpScript: []string{
@@ -7750,6 +7796,314 @@ where
 			{
 				Query:          "insert into t values (1, -1)",
 				ExpectedErrStr: "value -1 is not valid for this Enum",
+			},
+		},
+	},
+	{
+		Name:    "not expression optimization",
+		Dialect: "mysql",
+		SetUpScript: []string{
+			"create table t (i int);",
+			"insert into t values (123);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: "select * from t where 1 = (not(not(i)))",
+				Expected: []sql.Row{
+					{123},
+				},
+			},
+			{
+				Query: "select * from t where true = (not(not(i)))",
+				Expected: []sql.Row{
+					{123},
+				},
+			},
+			{
+				Query: "select * from t where true = (not(not(i = 123)))",
+				Expected: []sql.Row{
+					{123},
+				},
+			},
+			{
+				Query: "select * from t where false = (not(not(i != 123)))",
+				Expected: []sql.Row{
+					{123},
+				},
+			},
+			{
+				Query: "select * from t where i != (false or i);",
+				Expected: []sql.Row{
+					{123},
+				},
+			},
+			{
+				Query: "select * from t where ((true and -1) >= 0);",
+				Expected: []sql.Row{
+					{123},
+				},
+			},
+		},
+	},
+	{
+		Name:    "negative int limits",
+		Dialect: "mysql",
+		SetUpScript: []string{
+			"CREATE TABLE t(i8 tinyint, i16 smallint, i24 mediumint, i32 int, i64 bigint);",
+			"INSERT INTO t VALUES(-128, -32768, -8388608, -2147483648, -9223372036854775808);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				SkipResultCheckOnServerEngine: true,
+				Query:                         "SELECT -i8, -i16, -i24, -i32 from t;",
+				Expected: []sql.Row{
+					{128, 32768, 8388608, 2147483648},
+				},
+			},
+			{
+				Query:          "SELECT -i64 from t;",
+				ExpectedErrStr: "BIGINT out of range for -9223372036854775808",
+			},
+		},
+	},
+	{
+		Name:    "negative int limits",
+		Dialect: "mysql",
+		SetUpScript: []string{
+			"CREATE TABLE t(i8 tinyint, i16 smallint, i24 mediumint, i32 int, i64 bigint);",
+			"INSERT INTO t VALUES(-128, -32768, -8388608, -2147483648, -9223372036854775808);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				SkipResultCheckOnServerEngine: true,
+				Query:                         "SELECT -i8, -i16, -i24, -i32 from t;",
+				Expected: []sql.Row{
+					{128, 32768, 8388608, 2147483648},
+				},
+			},
+			{
+				Query:          "SELECT -i64 from t;",
+				ExpectedErrStr: "BIGINT out of range for -9223372036854775808",
+			},
+		},
+	},
+	{
+		Name:    "std, stdev, stddev_pop, variance, var_pop, var_samp tests",
+		Dialect: "mysql",
+		SetUpScript: []string{
+			"create table t (i int);",
+			"create table tt (i int, j int);",
+			"insert into tt values (0, 1), (0, 2), (0, 3);",
+			"insert into tt values (1, 123), (1, 456), (1, 789);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: "select std(i), stddev(i), stddev_pop(i), stddev_samp(i) from t;",
+				Expected: []sql.Row{
+					{nil, nil, nil, nil},
+				},
+			},
+			{
+				Query: "select variance(i), var_pop(i), var_samp(i) from t;",
+				Expected: []sql.Row{
+					{nil, nil, nil},
+				},
+			},
+			{
+				Query: "insert into t values (1);",
+				Expected: []sql.Row{
+					{types.NewOkResult(1)},
+				},
+			},
+			{
+				Query: "select std(i), stddev(i), stddev_pop(i), stddev_samp(i) from t;",
+				Expected: []sql.Row{
+					{0.0, 0.0, 0.0, nil},
+				},
+			},
+			{
+				Query: "select variance(i), var_pop(i), var_samp(i) from t;",
+				Expected: []sql.Row{
+					{0.0, 0.0, nil},
+				},
+			},
+			{
+				Query: "insert into t values (2);",
+				Expected: []sql.Row{
+					{types.NewOkResult(1)},
+				},
+			},
+			{
+				Query: "select std(i), stddev(i), stddev_pop(i), stddev_samp(i) from t;",
+				Expected: []sql.Row{
+					{0.5, 0.5, 0.5, 0.7071067811865476},
+				},
+			},
+			{
+				Query: "select variance(i), var_pop(i), var_samp(i) from t;",
+				Expected: []sql.Row{
+					{0.25, 0.25, 0.5},
+				},
+			},
+			{
+				Query: "insert into t values (3);",
+				Expected: []sql.Row{
+					{types.NewOkResult(1)},
+				},
+			},
+			{
+				Query: "select std(i), stddev(i), stddev_pop(i), stddev_samp(i) from t;",
+				Expected: []sql.Row{
+					{0.816496580927726, 0.816496580927726, 0.816496580927726, 1.0},
+				},
+			},
+			{
+				Query: "select variance(i), var_pop(i), var_samp(i) from t;",
+				Expected: []sql.Row{
+					{0.6666666666666666, 0.6666666666666666, 1.0},
+				},
+			},
+			{
+				Query: "insert into t values (null), (null);",
+				Expected: []sql.Row{
+					{types.NewOkResult(2)},
+				},
+			},
+			{
+				Query: "select std(i), stddev(i), stddev_pop(i), stddev_samp(i) from t;",
+				Expected: []sql.Row{
+					{0.816496580927726, 0.816496580927726, 0.816496580927726, 1.0},
+				},
+			},
+			{
+				Query: "select variance(i), var_pop(i), var_samp(i) from t;",
+				Expected: []sql.Row{
+					{0.6666666666666666, 0.6666666666666666, 1.0},
+				},
+			},
+			{
+				Query: "select i, std(j), stddev_samp(j) from tt group by i;",
+				Expected: []sql.Row{
+					{0, 0.816496580927726, 1.0},
+					{1, 271.89336144893275, 333.0},
+				},
+			},
+			{
+				Query: "select i, variance(i), var_samp(i) from tt group by i;",
+				Expected: []sql.Row{
+					{0, 0.0, 0.0},
+					{1, 0.0, 0.0},
+				},
+			},
+			{
+				Query: "select std(i) over(), std(j) over(), stddev_samp(j) over() from tt order by i;",
+				Expected: []sql.Row{
+					{0.5, 297.47660972475353, 325.86929895281634},
+					{0.5, 297.47660972475353, 325.86929895281634},
+					{0.5, 297.47660972475353, 325.86929895281634},
+					{0.5, 297.47660972475353, 325.86929895281634},
+					{0.5, 297.47660972475353, 325.86929895281634},
+					{0.5, 297.47660972475353, 325.86929895281634},
+				},
+			},
+			{
+				Query: "select i, std(j) over(partition by i), stddev_samp(j) over(partition by i) from tt order by i;",
+				Expected: []sql.Row{
+					{0, 0.816496580927726, 1.0},
+					{0, 0.816496580927726, 1.0},
+					{0, 0.816496580927726, 1.0},
+					{1, 271.89336144893275, 333.0},
+					{1, 271.89336144893275, 333.0},
+					{1, 271.89336144893275, 333.0},
+				},
+			},
+			{
+				Query: "select i, variance(i) over(), var_samp(i) over() from tt order by i;",
+				Expected: []sql.Row{
+					{0, 0.25, 0.3},
+					{0, 0.25, 0.3},
+					{0, 0.25, 0.3},
+					{1, 0.25, 0.3},
+					{1, 0.25, 0.3},
+					{1, 0.25, 0.3},
+				},
+			},
+			{
+				Query: "select i, variance(j) over(partition by i), var_samp(i) over(partition by i) from tt order by i;",
+				Expected: []sql.Row{
+					{0, 0.6666666666666666, 0.0},
+					{0, 0.6666666666666666, 0.0},
+					{0, 0.6666666666666666, 0.0},
+					{1, 73926.0, 0.0},
+					{1, 73926.0, 0.0},
+					{1, 73926.0, 0.0},
+				},
+			},
+			{
+				Query: "insert into tt values (null, null);",
+				Expected: []sql.Row{
+					{types.NewOkResult(1)},
+				},
+			},
+			{
+				Query: "select i, std(i) over(), std(j) over(), stddev_samp(j) over() from tt order by i;",
+				Expected: []sql.Row{
+					{nil, 0.5, 297.47660972475353, 325.86929895281634},
+					{0, 0.5, 297.47660972475353, 325.86929895281634},
+					{0, 0.5, 297.47660972475353, 325.86929895281634},
+					{0, 0.5, 297.47660972475353, 325.86929895281634},
+					{1, 0.5, 297.47660972475353, 325.86929895281634},
+					{1, 0.5, 297.47660972475353, 325.86929895281634},
+					{1, 0.5, 297.47660972475353, 325.86929895281634},
+				},
+			},
+			{
+				Query: "select i, std(j) over(partition by i), stddev_samp(j) over(partition by i) from tt order by i;",
+				Expected: []sql.Row{
+					{nil, nil, nil},
+					{0, 0.816496580927726, 1.0},
+					{0, 0.816496580927726, 1.0},
+					{0, 0.816496580927726, 1.0},
+					{1, 271.89336144893275, 333.0},
+					{1, 271.89336144893275, 333.0},
+					{1, 271.89336144893275, 333.0},
+				},
+			},
+			{
+				Query: "select i, variance(i) over(), var_samp(i) over() from tt order by i;",
+				Expected: []sql.Row{
+					{nil, 0.25, 0.3},
+					{0, 0.25, 0.3},
+					{0, 0.25, 0.3},
+					{0, 0.25, 0.3},
+					{1, 0.25, 0.3},
+					{1, 0.25, 0.3},
+					{1, 0.25, 0.3},
+				},
+			},
+			{
+				Query: "select i, variance(j) over(partition by i), var_samp(i) over(partition by i) from tt order by i;",
+				Expected: []sql.Row{
+					{nil, nil, nil},
+					{0, 0.6666666666666666, 0.0},
+					{0, 0.6666666666666666, 0.0},
+					{0, 0.6666666666666666, 0.0},
+					{1, 73926.0, 0.0},
+					{1, 73926.0, 0.0},
+					{1, 73926.0, 0.0},
+				},
+			},
+			{
+				Query: "select i, stddev_pop(j) over w, stddev_samp(j) over w, variance(j) over w, var_samp(i) over w from tt window w as (partition by i) order by i;",
+				Expected: []sql.Row{
+					{nil, nil, nil, nil, nil},
+					{0, 0.816496580927726, 1.0, 0.6666666666666666, 0.0},
+					{0, 0.816496580927726, 1.0, 0.6666666666666666, 0.0},
+					{0, 0.816496580927726, 1.0, 0.6666666666666666, 0.0},
+					{1, 271.89336144893275, 333.0, 73926.0, 0.0},
+					{1, 271.89336144893275, 333.0, 73926.0, 0.0},
+					{1, 271.89336144893275, 333.0, 73926.0, 0.0},
+				},
 			},
 		},
 	},

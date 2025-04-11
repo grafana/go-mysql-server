@@ -30,21 +30,25 @@ import (
 )
 
 type insertIter struct {
-	schema      sql.Schema
-	inserter    sql.RowInserter
-	replacer    sql.RowReplacer
-	updater     sql.RowUpdater
-	rowSource   sql.RowIter
-	unlocker    func()
-	ctx         *sql.Context
-	insertExprs []sql.Expression
-	updateExprs []sql.Expression
-	checks      sql.CheckConstraints
-	tableNode   sql.Node
-	closed      bool
-	ignore      bool
+	schema       sql.Schema
+	inserter     sql.RowInserter
+	replacer     sql.RowReplacer
+	updater      sql.RowUpdater
+	rowSource    sql.RowIter
+	unlocker     func()
+	ctx          *sql.Context
+	insertExprs  []sql.Expression
+	updateExprs  []sql.Expression
+	checks       sql.CheckConstraints
+	tableNode    sql.Node
+	closed       bool
+	ignore       bool
+	returnExprs  []sql.Expression
+	returnSchema sql.Schema
 
 	firstGeneratedAutoIncRowIdx int
+
+	deferredDefaults sql.FastIntSet
 }
 
 func getInsertExpressions(values sql.Node) []sql.Expression {
@@ -92,7 +96,7 @@ func (i *insertIter) Next(ctx *sql.Context) (returnRow sql.Row, returnErr error)
 	// Do any necessary type conversions to the target schema
 	for idx, col := range i.schema {
 		if row[idx] != nil {
-			converted, inRange, cErr := col.Type.Convert(row[idx])
+			converted, inRange, cErr := col.Type.Convert(ctx, row[idx])
 			if cErr == nil && !inRange {
 				cErr = sql.ErrValueOutOfRange.New(row[idx], col.Type)
 			}
@@ -172,6 +176,18 @@ func (i *insertIter) Next(ctx *sql.Context) (returnRow sql.Row, returnErr error)
 	}
 
 	i.updateLastInsertId(ctx, row)
+
+	if len(i.returnExprs) > 0 {
+		var retExprRow sql.Row
+		for _, returnExpr := range i.returnExprs {
+			result, err := returnExpr.Eval(ctx, row)
+			if err != nil {
+				return nil, err
+			}
+			retExprRow = append(retExprRow, result)
+		}
+		return retExprRow, nil
+	}
 
 	return row, nil
 }
@@ -395,12 +411,14 @@ func (i *insertIter) validateNullability(ctx *sql.Context, dstSchema sql.Schema,
 	for count, col := range dstSchema {
 		if !col.Nullable && row[count] == nil {
 			// In the case of an IGNORE we set the nil value to a default and add a warning
-			if i.ignore {
-				row[count] = col.Type.Zero()
-				_ = warnOnIgnorableError(ctx, row, sql.ErrInsertIntoNonNullableProvidedNull.New(col.Name)) // will always return nil
-			} else {
+			if !i.ignore {
+				if i.deferredDefaults.Contains(count) {
+					return sql.ErrInsertIntoNonNullableDefaultNullColumn.New(col.Name)
+				}
 				return sql.ErrInsertIntoNonNullableProvidedNull.New(col.Name)
 			}
+			row[count] = col.Type.Zero()
+			_ = warnOnIgnorableError(ctx, row, sql.ErrInsertIntoNonNullableProvidedNull.New(col.Name)) // will always return nil
 		}
 	}
 	return nil

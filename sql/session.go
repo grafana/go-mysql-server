@@ -177,7 +177,7 @@ type Session interface {
 type PersistableSession interface {
 	Session
 	// PersistGlobal writes to the persisted global system variables file
-	PersistGlobal(sysVarName string, value interface{}) error
+	PersistGlobal(ctx *Context, sysVarName string, value interface{}) error
 	// RemovePersistedGlobal deletes a variable from the persisted globals file
 	RemovePersistedGlobal(sysVarName string) error
 	// RemoveAllPersistedGlobals clears the contents of the persisted globals file
@@ -360,7 +360,7 @@ func NewContext(
 	c := &Context{
 		Context:   ctx,
 		Session:   nil,
-		queryTime: ctxNowFunc(),
+		queryTime: Now(),
 		tracer:    NoopTracer,
 	}
 	for _, opt := range opts {

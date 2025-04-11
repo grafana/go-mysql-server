@@ -43,7 +43,7 @@ type StatsProv struct {
 
 var _ sql.StatsProvider = (*StatsProv)(nil)
 
-func (s *StatsProv) RefreshTableStats(ctx *sql.Context, table sql.Table, db string) error {
+func (s *StatsProv) AnalyzeTable(ctx *sql.Context, table sql.Table, db string) error {
 	// non-Dolt would sample the table to get estimate of unique and histogram
 	iat, ok := table.(sql.IndexAddressableTable)
 	if !ok {
@@ -128,7 +128,7 @@ func (s *StatsProv) estimateStats(ctx *sql.Context, table sql.Table, keys map[st
 				return true
 			}
 			col := sch[ordinals[k]]
-			cmp, _ := col.Type.Compare(keyVals[i][k], keyVals[j][k])
+			cmp, _ := col.Type.Compare(ctx, keyVals[i][k], keyVals[j][k])
 			return cmp <= 0
 		})
 

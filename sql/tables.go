@@ -126,7 +126,7 @@ type IndexAddressable interface {
 	// IndexedAccess returns a table that can perform scans constrained to
 	// an IndexLookup on the index given, or nil if the index cannot support
 	// the lookup expression.
-	IndexedAccess(lookup IndexLookup) IndexedTable
+	IndexedAccess(ctx *Context, lookup IndexLookup) IndexedTable
 	// GetIndexes returns an array of this table's Indexes
 	GetIndexes(ctx *Context) ([]Index, error)
 	// PreciseMatch returns whether an indexed access can substitute for filters
@@ -192,7 +192,7 @@ type ForeignKeyTable interface {
 	CreateIndexForForeignKey(ctx *Context, indexDef IndexDef) error
 	// GetDeclaredForeignKeys returns the foreign key constraints that are declared by this table.
 	GetDeclaredForeignKeys(ctx *Context) ([]ForeignKeyConstraint, error)
-	// GetReferencedForeignKeys returns the foreign key constraints that are referenced by this table.
+	// GetReferencedForeignKeys returns the foreign key constraints that reference this table as the parent
 	GetReferencedForeignKeys(ctx *Context) ([]ForeignKeyConstraint, error)
 	// AddForeignKey adds the given foreign key constraint to the table. Returns an error if the foreign key name
 	// already exists on any other table within the database.

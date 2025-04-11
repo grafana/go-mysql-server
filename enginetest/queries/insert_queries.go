@@ -24,6 +24,8 @@ import (
 	"github.com/dolthub/go-mysql-server/sql/types"
 )
 
+var sqlCtx = sql.NewEmptyContext()
+
 var InsertQueries = []WriteQueryTest{
 	{
 		WriteQuery:          "INSERT INTO keyless VALUES ();",
@@ -113,7 +115,7 @@ var InsertQueries = []WriteQueryTest{
 			int64(999), int8(math.MaxInt8), int16(math.MaxInt16), int32(math.MaxInt32), int64(math.MaxInt64),
 			uint8(math.MaxUint8), uint16(math.MaxUint16), uint32(math.MaxUint32), uint64(math.MaxUint64),
 			float32(math.MaxFloat32), float64(math.MaxFloat64),
-			sql.MustConvert(types.Timestamp.Convert("2037-04-05 12:51:36")), sql.MustConvert(types.Date.Convert("2231-11-07")),
+			sql.MustConvert(types.Timestamp.Convert(sqlCtx, "2037-04-05 12:51:36")), sql.MustConvert(types.Date.Convert(sqlCtx, "2231-11-07")),
 			"random text", sql.True, types.MustJSON(`{"key":"value"}`), []byte("blobdata"), "v1", "v2",
 		}},
 	},
@@ -131,7 +133,7 @@ var InsertQueries = []WriteQueryTest{
 			int64(999), int8(math.MaxInt8), int16(math.MaxInt16), int32(math.MaxInt32), int64(math.MaxInt64),
 			uint8(math.MaxUint8), uint16(math.MaxUint16), uint32(math.MaxUint32), uint64(math.MaxUint64),
 			float32(math.MaxFloat32), float64(math.MaxFloat64),
-			sql.MustConvert(types.Timestamp.Convert("2037-04-05 12:51:36")), sql.MustConvert(types.Date.Convert("2231-11-07")),
+			sql.MustConvert(types.Timestamp.Convert(sqlCtx, "2037-04-05 12:51:36")), sql.MustConvert(types.Date.Convert(sqlCtx, "2231-11-07")),
 			"random text", sql.True, types.MustJSON(`{"key":"value"}`), []byte("blobdata"), "v1", "v2",
 		}},
 	},
@@ -188,7 +190,7 @@ var InsertQueries = []WriteQueryTest{
 			int64(999), int8(-math.MaxInt8 - 1), int16(-math.MaxInt16 - 1), int32(-math.MaxInt32 - 1), int64(-math.MaxInt64 - 1),
 			uint8(0), uint16(0), uint32(0), uint64(0),
 			float32(math.SmallestNonzeroFloat32), float64(math.SmallestNonzeroFloat64),
-			sql.MustConvert(types.Timestamp.Convert("2037-04-05 12:51:36")), types.Date.Zero(),
+			sql.MustConvert(types.Timestamp.Convert(sqlCtx, "2037-04-05 12:51:36")), types.Date.Zero(),
 			"", sql.False, types.MustJSON(`""`), []byte(""), "v1", "v2",
 		}},
 	},
@@ -209,7 +211,7 @@ var InsertQueries = []WriteQueryTest{
 		WriteQuery:          `INSERT INTO typestable (id, ti, da) VALUES (999, '2021-09-1', '2021-9-01');`,
 		ExpectedWriteResult: []sql.Row{{types.NewOkResult(1)}},
 		SelectQuery:         "SELECT id, ti, da FROM typestable WHERE id = 999;",
-		ExpectedSelect:      []sql.Row{{int64(999), sql.MustConvert(types.Timestamp.Convert("2021-09-01")), sql.MustConvert(types.Date.Convert("2021-09-01"))}},
+		ExpectedSelect:      []sql.Row{{int64(999), sql.MustConvert(types.Timestamp.Convert(sqlCtx, "2021-09-01")), sql.MustConvert(types.Date.Convert(sqlCtx, "2021-09-01"))}},
 	},
 	{
 		WriteQuery: `INSERT INTO typestable SET id=999, i8=null, i16=null, i32=null, i64=null, u8=null, u16=null, u32=null, u64=null,
@@ -571,7 +573,7 @@ var InsertQueries = []WriteQueryTest{
 	},
 	{
 		WriteQuery:          "INSERT INTO auto_increment_tbl values (5, 44)",
-		ExpectedWriteResult: []sql.Row{{types.OkResult{RowsAffected: 1, InsertID: 0}}},
+		ExpectedWriteResult: []sql.Row{{types.OkResult{RowsAffected: 1, InsertID: 5}}},
 		SelectQuery:         "SELECT * FROM auto_increment_tbl ORDER BY pk",
 		ExpectedSelect: []sql.Row{
 			{1, 11},
@@ -629,7 +631,7 @@ var InsertQueries = []WriteQueryTest{
 	},
 	{
 		WriteQuery:          `INSERT INTO auto_increment_tbl VALUES ('4', 44)`,
-		ExpectedWriteResult: []sql.Row{{types.NewOkResult(1)}},
+		ExpectedWriteResult: []sql.Row{{types.OkResult{RowsAffected: 1, InsertID: 4}}},
 		SelectQuery:         `SELECT * from auto_increment_tbl where pk=4`,
 		ExpectedSelect: []sql.Row{
 			{4, 44},
@@ -1354,7 +1356,7 @@ var InsertScripts = []ScriptTest{
 			{
 				Query: "insert into auto values (1)",
 				Expected: []sql.Row{
-					{types.OkResult{RowsAffected: 1, InsertID: 0}},
+					{types.OkResult{RowsAffected: 1, InsertID: 1}},
 				},
 			},
 			{
@@ -1373,7 +1375,7 @@ var InsertScripts = []ScriptTest{
 			{
 				Query: "insert into auto_pk values (0), (1), (NULL), ()",
 				Expected: []sql.Row{
-					{types.OkResult{RowsAffected: 4, InsertID: 2}},
+					{types.OkResult{RowsAffected: 4}},
 				},
 			},
 			{
@@ -2804,7 +2806,7 @@ var InsertIgnoreScripts = []ScriptTest{
 			},
 			{
 				Query:    "insert ignore into test_table values (1, 'invalid'), (2, 'bye'), (3, null)",
-				Expected: []sql.Row{{types.OkResult{RowsAffected: 3}}},
+				Expected: []sql.Row{{types.OkResult{RowsAffected: 3, InsertID: 1}}},
 				//ExpectedWarning: mysql.ERWarnDataTruncated, // TODO: incorrect code
 			},
 			{
@@ -2895,7 +2897,7 @@ var IgnoreWithDuplicateUniqueKeyKeylessScripts = []ScriptTest{
 		Assertions: []ScriptTestAssertion{
 			{
 				Query:    "UPDATE IGNORE keyless SET val = 2 where pk = 1",
-				Expected: []sql.Row{{newUpdateResult(1, 1)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 1)}},
 			},
 			{
 				Query:    "SELECT * FROM keyless ORDER BY pk",
@@ -2907,7 +2909,7 @@ var IgnoreWithDuplicateUniqueKeyKeylessScripts = []ScriptTest{
 			},
 			{
 				Query:    "UPDATE IGNORE keyless SET val = 1 where pk = 1",
-				Expected: []sql.Row{{newUpdateResult(1, 1)}},
+				Expected: []sql.Row{{NewUpdateResult(1, 1)}},
 			},
 			{
 				Query:    "ALTER TABLE keyless ADD CONSTRAINT c UNIQUE(val)",
@@ -2915,7 +2917,7 @@ var IgnoreWithDuplicateUniqueKeyKeylessScripts = []ScriptTest{
 			},
 			{
 				Query:                 "UPDATE IGNORE keyless SET val = 3 where pk = 1",
-				Expected:              []sql.Row{{newUpdateResult(1, 0)}},
+				Expected:              []sql.Row{{NewUpdateResult(1, 0)}},
 				ExpectedWarningsCount: 1,
 				ExpectedWarning:       mysql.ERDupEntry,
 			},
@@ -2925,7 +2927,7 @@ var IgnoreWithDuplicateUniqueKeyKeylessScripts = []ScriptTest{
 			},
 			{
 				Query:                 "UPDATE IGNORE keyless SET val = val + 1 ORDER BY pk",
-				Expected:              []sql.Row{{newUpdateResult(3, 1)}},
+				Expected:              []sql.Row{{NewUpdateResult(3, 1)}},
 				ExpectedWarningsCount: 2,
 				ExpectedWarning:       mysql.ERDupEntry,
 			},
