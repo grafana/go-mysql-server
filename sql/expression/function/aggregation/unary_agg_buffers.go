@@ -134,11 +134,6 @@ type lastBuffer struct {
 }
 
 func NewLastBuffer(child sql.Expression) *lastBuffer {
-	const (
-		sum  = float64(0)
-		rows = int64(0)
-	)
-
 	return &lastBuffer{nil, child}
 }
 
@@ -175,11 +170,7 @@ type avgBuffer struct {
 }
 
 func NewAvgBuffer(child sql.Expression) *avgBuffer {
-	const (
-		rows = int64(0)
-	)
-
-	return &avgBuffer{NewSumBuffer(child), rows, child}
+	return &avgBuffer{NewSumBuffer(child), 0, child}
 }
 
 // Update implements the AggregationBuffer interface.

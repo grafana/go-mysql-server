@@ -220,6 +220,11 @@ type LifecycleAwareSession interface {
 	SessionEnd()
 }
 
+type LifecycleCancellableSession interface {
+	LifecycleAwareSession
+	CommandBeginWithCancel(cancelFunc context.CancelFunc) error
+}
+
 type (
 	// TypedValue is a value along with its type.
 	TypedValue struct {
@@ -740,4 +745,12 @@ func SessionEnd(s Session) {
 	if cur, ok := s.(LifecycleAwareSession); ok {
 		cur.SessionEnd()
 	}
+}
+
+// Helper function to call CommandBegin on a LifecycleAwareSession, or do nothing.
+func SessionCommandBeginWithCancel(s Session, cancelFunc context.CancelFunc) error {
+	if cur, ok := s.(LifecycleCancellableSession); ok {
+		return cur.CommandBeginWithCancel(cancelFunc)
+	}
+	return nil
 }
