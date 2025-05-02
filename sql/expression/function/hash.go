@@ -283,7 +283,10 @@ func (f *Compress) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	valBytes := val.([]byte)
+	valBytes, _, err := sql.Unwrap[[]byte](ctx, val)
+	if err != nil {
+		return nil, err
+	}
 	if len(valBytes) == 0 {
 		return []byte{}, nil
 	}
@@ -368,7 +371,10 @@ func (f *Uncompress) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 		ctx.Warn(1258, err.Error())
 		return nil, nil
 	}
-	valBytes := val.([]byte)
+	valBytes, _, err := sql.Unwrap[[]byte](ctx, val)
+	if err != nil {
+		return nil, err
+	}
 	if len(valBytes) == 0 {
 		return []byte{}, nil
 	}

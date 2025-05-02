@@ -290,19 +290,20 @@ func convertValue(ctx *sql.Context, val interface{}, castTo string, originType s
 	switch strings.ToLower(castTo) {
 	case ConvertToBinary:
 		b, _, err := types.LongBlob.Convert(ctx, val)
+		bb, _, err := sql.Unwrap[[]byte](ctx, b)
 		if err != nil {
 			return nil, nil
 		}
 		if types.IsTextOnly(originType) {
 			// For string types we need to re-encode the string as we want the binary representation of the character set
 			encoder := originType.(sql.StringType).Collation().CharacterSet().Encoder()
-			encodedBytes, ok := encoder.Encode(b.([]byte))
+			encodedBytes, ok := encoder.Encode(bb)
 			if !ok {
 				return nil, fmt.Errorf("unable to re-encode string to convert to binary")
 			}
 			b = encodedBytes
 		}
-		if bb, ok := b.([]byte); ok && len(bb) < typeLength {
+		if len(bb) < typeLength {
 			b = append(bb, make([]byte, typeLength-len(bb))...)
 		}
 		return truncateConvertedValue(b, typeLength)
@@ -314,8 +315,14 @@ func convertValue(ctx *sql.Context, val interface{}, castTo string, originType s
 		return truncateConvertedValue(s, typeLength)
 	case ConvertToDate:
 		_, isTime := val.(time.Time)
-		_, isString := val.(string)
-		_, isBinary := val.([]byte)
+		_, isString, err := sql.Unwrap[string](ctx, val)
+		if err != nil {
+			return nil, err
+		}
+		_, isBinary, err := sql.Unwrap[[]byte](ctx, val)
+		if err != nil {
+			return nil, err
+		}
 		if !(isTime || isString || isBinary) {
 			return nil, nil
 		}
@@ -326,8 +333,14 @@ func convertValue(ctx *sql.Context, val interface{}, castTo string, originType s
 		return d, nil
 	case ConvertToDatetime:
 		_, isTime := val.(time.Time)
-		_, isString := val.(string)
-		_, isBinary := val.([]byte)
+		_, isString, err := sql.Unwrap[string](ctx, val)
+		if err != nil {
+			return nil, err
+		}
+		_, isBinary, err := sql.Unwrap[[]byte](ctx, val)
+		if err != nil {
+			return nil, err
+		}
 		if !(isTime || isString || isBinary) {
 			return nil, nil
 		}
