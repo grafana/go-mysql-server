@@ -256,15 +256,18 @@ func (t StringType) Compare(ctx context.Context, a interface{}, b interface{}) (
 		if err != nil {
 			return 0, err
 		}
-		ai, err = sql.UnwrapAny(ctx, ai)
-		if err != nil {
-			return 0, err
-		}
 
 		if IsBinaryType(t) {
-			as = encodings.BytesToString(ai.([]byte))
+			ab, _, err := sql.Unwrap[[]byte](ctx, ai)
+			if err != nil {
+				return 0, err
+			}
+			as = encodings.BytesToString(ab)
 		} else {
-			as = ai.(string)
+			as, _, err = sql.Unwrap[string](ctx, ai)
+			if err != nil {
+				return 0, err
+			}
 		}
 	}
 	if bs, ok = b.(string); !ok {
@@ -277,9 +280,16 @@ func (t StringType) Compare(ctx context.Context, a interface{}, b interface{}) (
 			return 0, err
 		}
 		if IsBinaryType(t) {
-			bs = encodings.BytesToString(bi.([]byte))
+			bb, _, err := sql.Unwrap[[]byte](ctx, bi)
+			if err != nil {
+				return 0, err
+			}
+			bs = encodings.BytesToString(bb)
 		} else {
-			bs = bi.(string)
+			bs, _, err = sql.Unwrap[string](ctx, bi)
+			if err != nil {
+				return 0, err
+			}
 		}
 	}
 

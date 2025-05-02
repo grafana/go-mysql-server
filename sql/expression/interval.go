@@ -83,7 +83,10 @@ func (i *Interval) EvalDelta(ctx *sql.Context, row sql.Row) (*TimeDelta, error) 
 			return nil, err
 		}
 
-		text := val.(string)
+		text, _, err := sql.Unwrap[string](ctx, val)
+		if err != nil {
+			return nil, err
+		}
 		if !r.MatchString(text) {
 			return nil, errInvalidIntervalFormat.New(i.Unit, text)
 		}

@@ -233,7 +233,9 @@ func (expr *MatchAgainst) inNaturalLanguageMode(ctx *sql.Context, row sql.Row) (
 			err = nErr
 			return
 		}
-		wordsStr, ok := words.(string)
+		var wordsStr string
+		var ok bool
+		wordsStr, ok, err = sql.Unwrap[string](ctx, words)
 		if !ok {
 			if words != nil {
 				err = fmt.Errorf("expected WORD to be a string, but had type `%T`", words)

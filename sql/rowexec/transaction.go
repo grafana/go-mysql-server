@@ -255,7 +255,10 @@ func (b *BaseBuilder) buildSignal(ctx *sql.Context, n *plan.Signal, row sql.Row)
 			if err != nil {
 				return nil, err
 			}
-			s, ok := exprResult.(string)
+			s, ok, err := sql.Unwrap[string](ctx, exprResult)
+			if err != nil {
+				return nil, err
+			}
 			if !ok {
 				return nil, fmt.Errorf("message text expression did not evaluate to a string")
 			}

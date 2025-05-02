@@ -394,7 +394,7 @@ func getFloatOrMaxDecimalType(e sql.Expression, treatIntsAsFloats bool) sql.Type
 // the result value to have precise precision and scale.
 func convertToDecimalValue(ctx *sql.Context, val interface{}, isTimeType bool) interface{} {
 	if isTimeType {
-		val = convertTimeTypeToString(val)
+		val, err = convertTimeTypeToString(ctx, val)
 	}
 	switch v := val.(type) {
 	case bool:

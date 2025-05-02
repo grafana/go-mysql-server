@@ -15,6 +15,7 @@
 package expression
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"reflect"
@@ -430,11 +431,13 @@ func isOutermostArithmeticOp(e sql.Expression, opScale int32) bool {
 // E.g: `2022-11-10 12:14:36` is parsed into `20221110121436` and `2022-03-24` is parsed into `20220324`.
 func convertValueToType(ctx *sql.Context, typ sql.Type, val interface{}, isTimeType bool) interface{} {
 	var cval interface{}
+	var err error
 	if isTimeType {
-		val = convertTimeTypeToString(val)
+		val, err = convertTimeTypeToString(ctx, val)
 	}
-
-	cval, _, err := typ.Convert(ctx, val)
+	if err == nil {
+		cval, _, err = typ.Convert(ctx, val)
+	}
 	if err != nil {
 		arithmeticWarning(ctx, mysql.ERTruncatedWrongValue, fmt.Sprintf("Truncated incorrect %s value: '%v'", typ.String(), val))
 		// the value is interpreted as 0, but we need to match the type of the other valid value
@@ -449,16 +452,19 @@ func convertValueToType(ctx *sql.Context, typ sql.Type, val interface{}, isTimeT
 // parsing. E.g:
 // `2022-11-10 12:14:36` is parsed into `20221110121436`
 // `2022-03-24` is parsed into `20220324`.
-func convertTimeTypeToString(val interface{}) interface{} {
+func convertTimeTypeToString(ctx context.Context, val interface{}) (interface{}, error) {
 	if t, ok := val.(time.Time); ok {
-		val = t.In(time.UTC).Format("2006-01-02 15:04:05")
+		return t.In(time.UTC).Format("2006-01-02 15:04:05"), nil
 	}
-	if t, ok := val.(string); ok {
+	t, ok, err := sql.Unwrap[string](ctx, val)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
 		nums := timeTypeRegex.FindAllString(t, -1)
-		val = strings.Join(nums, "")
+		return strings.Join(nums, ""), nil
 	}
-
-	return val
+	return val, nil
 }
 
 func plus(lval, rval interface{}) (interface{}, error) {
