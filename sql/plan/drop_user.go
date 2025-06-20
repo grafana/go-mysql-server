@@ -120,18 +120,7 @@ func (n *DropUser) RowIter(ctx *sql.Context, row sql.Row) (sql.RowIter, error) {
 		}
 
 		//TODO: if a user is mentioned in the "mandatory_roles" (users and roles are interchangeable) system variable then they cannot be dropped
-		editor.RemoveUser(mysql_db.UserPrimaryKey{
-			Host: existingUser.Host,
-			User: existingUser.User,
-		})
-		editor.RemoveRoleEdgesFromKey(mysql_db.RoleEdgesFromKey{
-			FromHost: existingUser.Host,
-			FromUser: existingUser.User,
-		})
-		editor.RemoveRoleEdgesToKey(mysql_db.RoleEdgesToKey{
-			ToHost: existingUser.Host,
-			ToUser: existingUser.User,
-		})
+		editor.RemoveUserAndRoles(mysql_db.UserPrimaryKey{Host: user.Host, User: user.Name})
 	}
 	if err := mysqlDb.Persist(ctx, editor); err != nil {
 		return nil, err

@@ -250,6 +250,20 @@ func (ed *Editor) RemoveUser(pk UserPrimaryKey) {
 	ed.reader.users.RemoveMany(UserPrimaryKeyer{}, pk)
 }
 
+func (ed *Editor) RemoveUserAndRoles(upk UserPrimaryKey) {
+	ed.RemoveUser(upk)
+
+	ed.RemoveRoleEdgesFromKey(RoleEdgesFromKey{
+		FromHost: upk.Host,
+		FromUser: upk.User,
+	})
+
+	ed.RemoveRoleEdgesToKey(RoleEdgesToKey{
+		ToHost: upk.Host,
+		ToUser: upk.User,
+	})
+}
+
 func (ed *Editor) PutRoleEdge(re *RoleEdge) {
 	if old, ok := ed.reader.roleEdges.Get(re); ok {
 		ed.reader.roleEdges.Remove(old)
