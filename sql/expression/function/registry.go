@@ -323,6 +323,7 @@ var BuiltIns = []sql.Function{
 	sql.Function1{Name: "values", Fn: NewValues},
 	sql.Function1{Name: "validate_password_strength", Fn: NewValidatePasswordStrength},
 	sql.Function1{Name: "variance", Fn: func(e sql.Expression) sql.Expression { return aggregation.NewVarPop(e) }},
+	sql.FunctionN{Name: "weight_string", Fn: NewWeightString},
 	sql.Function1{Name: "var_pop", Fn: func(e sql.Expression) sql.Expression { return aggregation.NewVarPop(e) }},
 	sql.Function1{Name: "var_samp", Fn: func(e sql.Expression) sql.Expression { return aggregation.NewVarSamp(e) }},
 	sql.Function2{Name: "vec_distance", Fn: vector.NewL2SquaredDistance},
