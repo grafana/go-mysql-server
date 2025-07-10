@@ -165,13 +165,13 @@ func (t EnumType) Convert(ctx context.Context, v interface{}) (interface{}, sql.
 
 	switch value := v.(type) {
 	case int:
-		// Check for 0 value in strict mode - MySQL behavior
-		// MySQL rejects 0 values in strict mode regardless of enum definition
-		if value == 0 && t.isStrictMode(ctx) {
-			return nil, sql.OutOfRange, ErrConvertingToEnum.New(value)
-		}
 		if _, ok := t.At(value); ok {
 			return uint16(value), sql.InRange, nil
+		}
+		// Check for 0 value in strict mode - MySQL behavior
+		// MySQL rejects 0 values in strict mode only for INSERT operations, not CREATE TABLE defaults
+		if value == 0 && t.isStrictMode(ctx) && t.isInsertContext(ctx) {
+			return nil, sql.OutOfRange, ErrConvertingToEnum.New(value)
 		}
 	case uint:
 		return t.Convert(ctx, int(value))
@@ -221,6 +221,24 @@ func (t EnumType) isStrictMode(ctx context.Context) bool {
 	if sqlCtx, ok := ctx.(*sql.Context); ok {
 		sqlMode := sql.LoadSqlMode(sqlCtx)
 		return sqlMode.ModeEnabled("STRICT_TRANS_TABLES") || sqlMode.ModeEnabled("STRICT_ALL_TABLES")
+	}
+	return false
+}
+
+// isInsertContext checks if we're in an INSERT operation context
+func (t EnumType) isInsertContext(ctx context.Context) bool {
+	if sqlCtx, ok := ctx.(*sql.Context); ok {
+		// Check if we're in an INSERT operation by looking for ProcessList entry
+		if sqlCtx.ProcessList != nil {
+			for _, process := range sqlCtx.ProcessList.Processes() {
+				if process.Query != "" {
+					query := strings.ToUpper(strings.TrimSpace(process.Query))
+					if strings.HasPrefix(query, "INSERT") {
+						return true
+					}
+				}
+			}
+		}
 	}
 	return false
 }
