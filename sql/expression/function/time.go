@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"gopkg.in/src-d/go-errors.v1"
 
 	gmstime "github.com/dolthub/go-mysql-server/internal/time"
@@ -1491,6 +1492,113 @@ func (m *TimeToSec) WithChildren(children ...sql.Expression) (sql.Expression, er
 		return nil, sql.ErrInvalidChildrenNumber.New(m, len(children), 1)
 	}
 	return NewTimeToSec(children[0]), nil
+}
+
+// SecToTime implements the sec_to_time function
+type SecToTime struct {
+	expression.UnaryExpression
+}
+
+var _ sql.FunctionExpression = (*SecToTime)(nil)
+var _ sql.CollationCoercible = (*SecToTime)(nil)
+
+func NewSecToTime(arg sql.Expression) sql.Expression {
+	return &SecToTime{expression.UnaryExpression{Child: arg}}
+}
+
+// FunctionName implements sql.FunctionExpression
+func (m *SecToTime) FunctionName() string {
+	return "sec_to_time"
+}
+
+// Description implements sql.FunctionExpression
+func (m *SecToTime) Description() string {
+	return "returns the argument converted to hours, minutes, and seconds."
+}
+
+// Type implements the Expression interface.
+func (m *SecToTime) Type() sql.Type {
+	return types.Time
+}
+
+// CollationCoercibility implements the interface sql.CollationCoercible.
+func (*SecToTime) CollationCoercibility(ctx *sql.Context) (collation sql.CollationID, coercibility byte) {
+	return sql.Collation_binary, 5
+}
+
+func (m *SecToTime) String() string {
+	return fmt.Sprintf("SEC_TO_TIME(%s)", m.Child.String())
+}
+
+func (m *SecToTime) IsNullable() bool {
+	return m.Child.IsNullable()
+}
+
+func (m *SecToTime) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
+	val, err := m.Child.Eval(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+
+	if val == nil {
+		return nil, nil
+	}
+
+	// Convert to decimal/float to handle seconds
+	dec, err := decimal.NewFromString(fmt.Sprintf("%v", val))
+	if err != nil {
+		// Try to convert to float64 for numeric values
+		switch v := val.(type) {
+		case float64:
+			dec = decimal.NewFromFloat(v)
+		case int64:
+			dec = decimal.NewFromInt(v)
+		case int:
+			dec = decimal.NewFromInt(int64(v))
+		case uint64:
+			dec = decimal.NewFromInt(int64(v))
+		case uint:
+			dec = decimal.NewFromInt(int64(v))
+		default:
+			return nil, sql.ErrInvalidType.New(val)
+		}
+	}
+
+	// Convert seconds to total seconds as integer
+	totalSeconds := dec.IntPart()
+	
+	// MySQL allows negative values and values beyond 24 hours
+	// Handle negative values
+	negative := totalSeconds < 0
+	if negative {
+		totalSeconds = -totalSeconds
+	}
+	
+	// Calculate hours, minutes, seconds
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+	
+	// Build time string - MySQL format allows hours > 24
+	timeStr := fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+	if negative {
+		timeStr = "-" + timeStr
+	}
+	
+	// Convert to time.Time using MySQL time conversion
+	timeVal, _, err := types.Time.Convert(ctx, timeStr)
+	if err != nil {
+		return nil, err
+	}
+	
+	return timeVal, nil
+}
+
+func (m *SecToTime) WithChildren(children ...sql.Expression) (sql.Expression, error) {
+	if len(children) != 1 {
+		return nil, sql.ErrInvalidChildrenNumber.New(m, len(children), 1)
+	}
+	return NewSecToTime(children[0]), nil
 }
 
 // WeekOfYear implements the weekofyear function

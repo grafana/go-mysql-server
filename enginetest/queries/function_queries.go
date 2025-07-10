@@ -21,6 +21,15 @@ import (
 	"github.com/dolthub/go-mysql-server/sql/types"
 )
 
+// parseTimespan is a helper function to parse time strings into Timespan values for tests
+func parseTimespan(timeStr string) types.Timespan {
+	t, _, err := types.Time.Convert(sql.NewEmptyContext(), timeStr)
+	if err != nil {
+		panic(err)
+	}
+	return t.(types.Timespan)
+}
+
 // FunctionQueryTests contains queries that primarily test SQL function calls
 var FunctionQueryTests = []QueryTest{
 	// String Functions
@@ -1522,6 +1531,68 @@ var FunctionQueryTests = []QueryTest{
 		Query: "select uncompressed_length(compress(repeat('a', 1000)))",
 		Expected: []sql.Row{
 			{uint32(1000)},
+		},
+	},
+	
+	// SEC_TO_TIME Function Tests
+	{
+		Query: "SELECT SEC_TO_TIME(2378)",
+		Expected: []sql.Row{
+			{parseTimespan("00:39:38")},
+		},
+	},
+	{
+		Query: "SELECT SEC_TO_TIME(3600)",
+		Expected: []sql.Row{
+			{parseTimespan("01:00:00")},
+		},
+	},
+	{
+		Query: "SELECT SEC_TO_TIME(86400)",
+		Expected: []sql.Row{
+			{parseTimespan("24:00:00")},
+		},
+	},
+	{
+		Query: "SELECT SEC_TO_TIME(90061)",
+		Expected: []sql.Row{
+			{parseTimespan("25:01:01")},
+		},
+	},
+	{
+		Query: "SELECT SEC_TO_TIME(0)",
+		Expected: []sql.Row{
+			{parseTimespan("00:00:00")},
+		},
+	},
+	{
+		Query: "SELECT SEC_TO_TIME(-3600)",
+		Expected: []sql.Row{
+			{parseTimespan("-01:00:00")},
+		},
+	},
+	{
+		Query: "SELECT SEC_TO_TIME(3661)",
+		Expected: []sql.Row{
+			{parseTimespan("01:01:01")},
+		},
+	},
+	{
+		Query: "SELECT SEC_TO_TIME(1234.5)",
+		Expected: []sql.Row{
+			{parseTimespan("00:20:34")},
+		},
+	},
+	{
+		Query: "SELECT SEC_TO_TIME(NULL)",
+		Expected: []sql.Row{
+			{nil},
+		},
+	},
+	{
+		Query: "SELECT SEC_TO_TIME(838*3600 + 59*60 + 59)",
+		Expected: []sql.Row{
+			{parseTimespan("838:59:59")},
 		},
 	},
 }

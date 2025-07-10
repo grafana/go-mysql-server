@@ -304,6 +304,7 @@ var BuiltIns = []sql.Function{
 	sql.Function1{Name: "time", Fn: NewTime},
 	sql.Function2{Name: "time_format", Fn: NewTimeFormat},
 	sql.Function1{Name: "time_to_sec", Fn: NewTimeToSec},
+	sql.Function1{Name: "sec_to_time", Fn: NewSecToTime},
 	sql.Function2{Name: "timediff", Fn: NewTimeDiff},
 	sql.FunctionN{Name: "timestamp", Fn: NewDatetime},
 	sql.Function3{Name: "timestampdiff", Fn: NewTimestampDiff},
