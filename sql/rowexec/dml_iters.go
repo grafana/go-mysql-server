@@ -349,6 +349,9 @@ type updateIgnoreAccumulatorRowHandler interface {
 
 type insertRowHandler struct {
 	rowsAffected              int
+	records                   int
+	duplicates                int
+	warnings                  int
 	lastInsertId              uint64
 	updatedAutoIncrementValue bool
 	lastInsertIdGetter        func(row sql.Row) int64
@@ -356,6 +359,7 @@ type insertRowHandler struct {
 
 func (i *insertRowHandler) handleRowUpdate(ctx *sql.Context, row sql.Row) error {
 	i.rowsAffected++
+	i.records++
 	if !i.updatedAutoIncrementValue {
 		i.updatedAutoIncrementValue = true
 		if i.lastInsertIdGetter != nil {
@@ -367,6 +371,14 @@ func (i *insertRowHandler) handleRowUpdate(ctx *sql.Context, row sql.Row) error 
 
 func (i *insertRowHandler) getLastInsertId() uint64 {
 	return i.lastInsertId
+}
+
+func (i *insertRowHandler) handleDuplicate() {
+	i.duplicates++
+}
+
+func (i *insertRowHandler) handleWarning() {
+	i.warnings++
 }
 
 func (i *insertRowHandler) okResult() types.OkResult {
@@ -680,7 +692,17 @@ func (a *accumulatorIter) Next(ctx *sql.Context) (r sql.Row, err error) {
 				ctx.SetLastQueryInfoInt(sql.FoundRows, ma.RowsMatched())
 			}
 
-			res := a.updateRowHandler.okResult() // TODO: Should add warnings here
+			res := a.updateRowHandler.okResult()
+		
+		// For INSERT operations, add MySQL-style Records/Duplicates/Warnings info
+		if ih, ok := a.updateRowHandler.(*insertRowHandler); ok {
+			warningCount := int(ctx.WarningCount())
+			res.Info = plan.InsertInfo{
+				Records:    ih.records,
+				Duplicates: ih.duplicates,
+				Warnings:   warningCount,
+			}
+		}
 
 			// For some update accumulators, we don't accurately track the last insert ID in the handler and need to set
 			// it manually in the result by getting it from the session. This doesn't work correctly in all cases and needs

@@ -15,6 +15,7 @@
 package plan
 
 import (
+	"fmt"
 	"strings"
 
 	"gopkg.in/src-d/go-errors.v1"
@@ -423,4 +424,14 @@ func getInsertableTable(t sql.Table) (sql.InsertableTable, error) {
 	default:
 		return nil, ErrInsertIntoNotSupported.New()
 	}
+}
+
+// InsertInfo is the Info for OKResults returned by Insert nodes.
+type InsertInfo struct {
+	Records, Duplicates, Warnings int
+}
+
+// String implements fmt.Stringer
+func (ii InsertInfo) String() string {
+	return fmt.Sprintf("Records: %d  Duplicates: %d  Warnings: %d", ii.Records, ii.Duplicates, ii.Warnings)
 }
