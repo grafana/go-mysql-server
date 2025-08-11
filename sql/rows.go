@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 
 	"github.com/dolthub/vitess/go/vt/proto/query"
 
@@ -81,6 +82,42 @@ func FormatRow(row Row) string {
 	}
 	sb.WriteRune(']')
 	return sb.String()
+}
+
+const defaultRowBuffCap = 4096
+
+type RowBuffer struct {
+	i   int
+	buf Row
+}
+
+func NewRowBuffer() *RowBuffer {
+	return &RowBuffer{
+		buf: make(Row, defaultRowBuffCap),
+	}
+}
+
+func (b *RowBuffer) Get(n int) (res Row) {
+	newI := b.i + n
+	if newI >= len(b.buf) {
+		//b.buf = append(b.buf, b.buf) // TODO: not sure if this is correct, but it seems faster
+		buf := make(Row, len(b.buf)*2)
+		copy(b.buf, buf)
+		b.buf = buf
+	}
+	res = b.buf[b.i:newI]
+	b.i = newI
+	return
+}
+
+func (b *RowBuffer) Reset() {
+	b.i = 0
+}
+
+var RowBufPool = sync.Pool{
+	New: func() any {
+		return NewRowBuffer()
+	},
 }
 
 // RowIter is an iterator that produces rows.
