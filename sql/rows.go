@@ -143,7 +143,7 @@ func RowIterToRows(ctx *Context, i RowIter) ([]Row, error) {
 			return nil, err
 		}
 
-		rows = append(rows, row)
+		rows = append(rows, row.Copy())
 	}
 
 	return rows, i.Close(ctx)
