@@ -212,8 +212,9 @@ func (i *joinIter) buildRow(primary, secondary sql.Row) sql.Row {
 }
 
 func (i *joinIter) Close(ctx *sql.Context) (err error) {
-	i.rowBuffer.Reset()
-	sql.RowBufPool.Put(i.rowBuffer)
+	//i.rowBuffer.Reset()
+	//sql.RowBufPool.Put(i.rowBuffer)
+	i.rowBuffer = nil
 
 	if i.primary != nil {
 		if err = i.primary.Close(ctx); err != nil {
@@ -416,8 +417,9 @@ func (i *existsIter) buildRow(primary, secondary sql.Row) sql.Row {
 }
 
 func (i *existsIter) Close(ctx *sql.Context) (err error) {
-	i.rowBuffer.Reset()
-	sql.RowBufPool.Put(i.rowBuffer)
+	i.rowBuffer = nil
+	//i.rowBuffer.Reset()
+	//sql.RowBufPool.Put(i.rowBuffer)
 
 	if i.primary != nil {
 		if err = i.primary.Close(ctx); err != nil {
@@ -587,8 +589,9 @@ func (i *fullJoinIter) buildRow(primary, secondary sql.Row) sql.Row {
 }
 
 func (i *fullJoinIter) Close(ctx *sql.Context) (err error) {
-	i.rowBuffer.Reset()
-	sql.RowBufPool.Put(i.rowBuffer)
+	i.rowBuffer = nil
+	//i.rowBuffer.Reset()
+	//sql.RowBufPool.Put(i.rowBuffer)
 
 	if i.l != nil {
 		err = i.l.Close(ctx)
@@ -706,8 +709,9 @@ func (i *crossJoinIterator) removeParentRow(r sql.Row) sql.Row {
 }
 
 func (i *crossJoinIterator) Close(ctx *sql.Context) (err error) {
-	i.rowBuffer.Reset() // TODO: just set i.rowBuffer = nil?
-	sql.RowBufPool.Put(i.rowBuffer)
+	i.rowBuffer = nil
+	//i.rowBuffer.Reset()
+	//sql.RowBufPool.Put(i.rowBuffer)
 
 	if i.l != nil {
 		err = i.l.Close(ctx)
@@ -909,8 +913,9 @@ func (i *lateralJoinIterator) Next(ctx *sql.Context) (sql.Row, error) {
 }
 
 func (i *lateralJoinIterator) Close(ctx *sql.Context) error {
-	i.rowBuffer.Reset()
-	sql.RowBufPool.Put(i.rowBuffer)
+	i.rowBuffer = nil
+	//i.rowBuffer.Reset()
+	//sql.RowBufPool.Put(i.rowBuffer)
 
 	var lerr, rerr error
 	if i.lIter != nil {
