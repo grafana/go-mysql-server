@@ -217,7 +217,7 @@ func (iter *rangeHeapJoinIter) buildRow(primary, secondary sql.Row) sql.Row {
 func (iter *rangeHeapJoinIter) Close(ctx *sql.Context) (err error) {
 	iter.rowBuffer.Reset()
 	sql.RowBufPool.Put(iter.rowBuffer)
-	
+
 	if iter.primary != nil {
 		if err = iter.primary.Close(ctx); err != nil {
 			if iter.secondary != nil {
