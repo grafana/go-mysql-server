@@ -320,7 +320,7 @@ func (i *mergeJoinIter) Next(ctx *sql.Context) (sql.Row, error) {
 }
 
 func (i *mergeJoinIter) copyReturnRow() sql.Row {
-	ret := i.rowBuffer.Get(len(i.fullRow))
+	ret := make(sql.Row, len(i.fullRow))
 	copy(ret, i.fullRow)
 	return ret
 }
@@ -580,6 +580,9 @@ func (i *mergeJoinIter) removeParentRow(r sql.Row) sql.Row {
 }
 
 func (i *mergeJoinIter) Close(ctx *sql.Context) (err error) {
+	i.rowBuffer.Reset()
+	sql.RowBufPool.Put(i.rowBuffer)
+
 	if i.left != nil {
 		err = i.left.Close(ctx)
 	}

@@ -214,8 +214,8 @@ func (i *joinIter) buildRow(primary, secondary sql.Row) sql.Row {
 }
 
 func (i *joinIter) Close(ctx *sql.Context) (err error) {
-	i.rowBuffer.Reset()
-	sql.RowBufPool.Put(i.rowBuffer)
+	//i.rowBuffer.Reset()
+	//sql.RowBufPool.Put(i.rowBuffer)
 
 	if i.primary != nil {
 		if err = i.primary.Close(ctx); err != nil {

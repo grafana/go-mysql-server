@@ -226,7 +226,11 @@ func rowFromRow2(sch Schema, r Row2) Row {
 
 // RowsToRowIter creates a RowIter that iterates over the given rows.
 func RowsToRowIter(rows ...Row) RowIter {
-	return &sliceRowIter{rows: rows}
+	allRows := make([]Row, len(rows))
+	for i, row := range rows {
+		allRows[i] = row.Copy()
+	}
+	return &sliceRowIter{rows: allRows}
 }
 
 type sliceRowIter struct {
@@ -238,10 +242,9 @@ func (i *sliceRowIter) Next(*Context) (Row, error) {
 	if i.idx >= len(i.rows) {
 		return nil, io.EOF
 	}
-
 	r := i.rows[i.idx]
 	i.idx++
-	return r.Copy(), nil
+	return r, nil
 }
 
 func (i *sliceRowIter) Close(*Context) error {
