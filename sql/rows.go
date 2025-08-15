@@ -84,7 +84,7 @@ func FormatRow(row Row) string {
 	return sb.String()
 }
 
-const defaultRowBuffCap = 4096
+const defaultRowBufCap = 128
 
 type RowBuffer struct {
 	i   int
@@ -93,17 +93,20 @@ type RowBuffer struct {
 
 func NewRowBuffer() *RowBuffer {
 	return &RowBuffer{
-		buf: make(Row, defaultRowBuffCap),
+		buf: make(Row, 0, defaultRowBufCap),
 	}
 }
 
 func (b *RowBuffer) Get(n int) (res Row) {
 	newI := b.i + n
-	if newI >= len(b.buf) {
-		//b.buf = append(b.buf, b.buf) // TODO: not sure if this is correct, but it seems faster
-		buf := make(Row, len(b.buf)*2)
-		copy(b.buf, buf)
+	if newI >= cap(b.buf) {
+		buf := make(Row, newI*2) // Golang is stupid, don't let it decide the new capacity
+		copy(buf, b.buf)
 		b.buf = buf
+	}
+	b.buf = b.buf[:newI]
+	for i := b.i; i < newI; i++ {
+		b.buf[i] = nil
 	}
 	res = b.buf[b.i:newI]
 	b.i = newI
@@ -111,7 +114,14 @@ func (b *RowBuffer) Get(n int) (res Row) {
 }
 
 func (b *RowBuffer) Reset() {
+	for i := 0; i < b.i; i++ {
+		b.buf[i] = nil
+	}
 	b.i = 0
+}
+
+func (b *RowBuffer) Erase(i int) {
+	b.i -= i
 }
 
 var RowBufPool = sync.Pool{
