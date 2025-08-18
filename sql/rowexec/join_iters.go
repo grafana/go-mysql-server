@@ -48,6 +48,8 @@ type joinIter struct {
 	rowSize    int
 	scopeLen   int
 	parentLen  int
+
+	rows []sql.Row
 }
 
 func newJoinIter(ctx *sql.Context, b sql.NodeExecBuilder, j *plan.JoinNode, row sql.Row) (sql.RowIter, error) {
@@ -200,13 +202,16 @@ func (i *joinIter) removeParentRow(r sql.Row) sql.Row {
 
 // buildRow builds the result set row using the rows from the primary and secondary tables
 func (i *joinIter) buildRow(primary, secondary sql.Row) sql.Row {
-	row := make(sql.Row, i.rowSize)
+	row := sql.GetRow(i.rowSize)
+	i.rows = append(i.rows, row)
 	copy(row, primary)
 	copy(row[len(primary):], secondary)
 	return row
 }
 
 func (i *joinIter) Close(ctx *sql.Context) (err error) {
+	sql.PutRows(i.rows)
+
 	if i.primary != nil {
 		if err = i.primary.Close(ctx); err != nil {
 			if i.secondary != nil {

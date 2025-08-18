@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 
 	"github.com/dolthub/vitess/go/vt/proto/query"
 
@@ -83,6 +84,37 @@ func FormatRow(row Row) string {
 	return sb.String()
 }
 
+const defaultRowCap = 16
+
+var rowPool = sync.Pool{
+	New: func() any {
+		return make(Row, 0, defaultRowCap)
+	},
+}
+
+func GetRow(n int) Row {
+	r := rowPool.Get().(Row)
+	if cap(r) < n {
+		r = make(Row, n)
+	} else {
+		r = r[:n]
+	}
+	for i := range r {
+		r[i] = nil
+	}
+	return r
+}
+
+func PutRow(r Row) {
+	rowPool.Put(r)
+}
+
+func PutRows(rows []Row) {
+	for _, row := range rows {
+		rowPool.Put(row)
+	}
+}
+
 // RowIter is an iterator that produces rows.
 // TODO: most row iters need to be Disposable for CachedResult safety
 type RowIter interface {
@@ -100,15 +132,12 @@ func RowIterToRows(ctx *Context, i RowIter) ([]Row, error) {
 		if err == io.EOF {
 			break
 		}
-
 		if err != nil {
 			i.Close(ctx)
 			return nil, err
 		}
-
-		rows = append(rows, row)
+		rows = append(rows, row.Copy())
 	}
-
 	return rows, i.Close(ctx)
 }
 
@@ -179,7 +208,11 @@ func rowFromRow2(sch Schema, r Row2) Row {
 
 // RowsToRowIter creates a RowIter that iterates over the given rows.
 func RowsToRowIter(rows ...Row) RowIter {
-	return &sliceRowIter{rows: rows}
+	allRows := make([]Row, len(rows))
+	for i, row := range rows {
+		allRows[i] = row.Copy()
+	}
+	return &sliceRowIter{rows: allRows}
 }
 
 type sliceRowIter struct {
@@ -191,10 +224,9 @@ func (i *sliceRowIter) Next(*Context) (Row, error) {
 	if i.idx >= len(i.rows) {
 		return nil, io.EOF
 	}
-
 	r := i.rows[i.idx]
 	i.idx++
-	return r.Copy(), nil
+	return r, nil
 }
 
 func (i *sliceRowIter) Close(*Context) error {

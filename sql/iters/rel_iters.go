@@ -522,9 +522,13 @@ func (i *sortIter) computeSortedRows(ctx *sql.Context) error {
 			return err
 		}
 
-		if err := cache.Add(row); err != nil {
+		// TODO: some iterators (like Union) Close() too early
+		if err := cache.Add(row.Copy()); err != nil {
 			return err
 		}
+
+		// TODO: since we are caching a copy, we can free some memory early, but we need to watch out for double free
+		//sql.PutRow(row)
 	}
 
 	rows := cache.Get()
@@ -611,6 +615,7 @@ func (ui *UnionIter) Next(ctx *sql.Context) (sql.Row, error) {
 		if ui.NextIter == nil {
 			return nil, io.EOF
 		}
+		// TODO: closing here causes problems with row pool, resolved by deep copying for sort nodes
 		err = ui.Cur.Close(ctx)
 		if err != nil {
 			return nil, err
