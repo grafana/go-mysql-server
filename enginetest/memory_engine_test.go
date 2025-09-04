@@ -200,23 +200,39 @@ func TestSingleQueryPrepared(t *testing.T) {
 
 // Convenience test for debugging a single query. Unskip and set to the desired query.
 func TestSingleScript(t *testing.T) {
-	t.Skip()
+	//t.Skip()
 	var scripts = []queries.ScriptTest{
 		{
-			Name:        "AS OF propagates to nested CALLs",
-			SetUpScript: []string{},
+			Name: "Update join with conflicting alias in Subquery Alias",
+			SetUpScript: []string{
+				"create table t1 (id int primary key, id1 int, key (id1));",
+				"create table t2 (id int primary key, id2 int, key (id2));",
+				"create table t3 (id int primary key, id3 int, key (id3));",
+
+				"insert into t1 values (0, 1);",
+				"insert into t2 values (1, 2);",
+				"insert into t3 values (2, 3);",
+
+				"create view v1 as (select * from t1);",
+				"create view v2 as (select * from t2);",
+				"create view v3 as (select * from t3);",
+			},
 			Assertions: []queries.ScriptTestAssertion{
+				//{
+				//	Query:    `explain plan select * from t1 where exists (select 1 from t2 where t1.id1 = t2.id);`,
+				//	Expected: []sql.Row{},
+				//},
+				//{
+				//	Query:    `explain plan select * from t1 join t2 where t1.id1 = t2.id;`,
+				//	Expected: []sql.Row{},
+				//},
+				//{
+				//	Query:    `select * from v1 where exists (select 1 from v2 where v1.id1 = v2.id and exists (select 1 from v3 where v2.id2 = v3.id and v3.id3 = 3));`,
+				//	Expected: []sql.Row{},
+				//},
 				{
-					Query: "create procedure create_proc() create table t (i int primary key, j int);",
-					Expected: []sql.Row{
-						{types.NewOkResult(0)},
-					},
-				},
-				{
-					Query: "call create_proc()",
-					Expected: []sql.Row{
-						{types.NewOkResult(0)},
-					},
+					Query:    `explain plan select /*+ LOOKUP_JOIN(t1, t2) */ * from t1 join t2 on t1.id = t2.id join t3 on t2.id = t3.id and t3.id = 3;`,
+					Expected: []sql.Row{},
 				},
 			},
 		},
@@ -230,8 +246,8 @@ func TestSingleScript(t *testing.T) {
 			panic(err)
 		}
 
-		//engine.EngineAnalyzer().Debug = true
-		//engine.EngineAnalyzer().Verbose = true
+		engine.EngineAnalyzer().Debug = true
+		engine.EngineAnalyzer().Verbose = true
 
 		enginetest.TestScriptWithEngine(t, engine, harness, test)
 	}

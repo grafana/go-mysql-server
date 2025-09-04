@@ -41,6 +41,7 @@ func (b *BaseBuilder) buildNodeExec(ctx *sql.Context, n sql.Node, row sql.Row) (
 	if withDescribeStats, ok := n.(sql.WithDescribeStats); ok {
 		iter = sql.NewCountingRowIter(iter, withDescribeStats)
 	}
+	// TODO: if n is a cacheable subquery, save the results and return them for next time
 	return iter, nil
 }
 
