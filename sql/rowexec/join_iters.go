@@ -300,6 +300,9 @@ func (i *existsIter) Next(ctx *sql.Context) (sql.Row, error) {
 			copy(i.primaryRow[i.parentLen:], r)
 			// TODO: if secondaryProvider is a cacheable subquery we don't need to keep rebuilding?
 			// TODO: alternatively, we could be returning an iter with cachedResults instead?
+			if sqa, ok := i.secondaryProvider.(*plan.SubqueryAlias); ok && sqa.CanCacheResults() {
+				print("asdf")
+			}
 			rIter, err = i.b.Build(ctx, i.secondaryProvider, i.primaryRow)
 			if err != nil {
 				return nil, err

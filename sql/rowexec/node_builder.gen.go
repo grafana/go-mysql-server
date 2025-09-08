@@ -134,7 +134,22 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 	case *plan.Sort:
 		return b.buildSort(ctx, n, row)
 	case *plan.SubqueryAlias:
-		return b.buildSubqueryAlias(ctx, n, row)
+		if b.sqaCache != nil {
+			if iter, ok := b.sqaCache[n]; ok {
+				return iter, nil
+			}
+		}
+		iter, err := b.buildSubqueryAlias(ctx, n, row)
+		if err != nil {
+			return nil, err
+		}
+		if b.sqaCache == nil {
+			b.sqaCache = make(map[sql.Node]sql.RowIter)
+		}
+		if n.CanCacheResults() {
+			b.sqaCache[n] = iter
+		}
+		return iter, nil
 	case *plan.SetOp:
 		return b.buildSetOp(ctx, n, row)
 	case *plan.IndexedTableAccess:

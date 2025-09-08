@@ -882,6 +882,41 @@ func (b *BaseBuilder) buildSetOp(ctx *sql.Context, s *plan.SetOp, row sql.Row) (
 	return sql.NewSpanIter(span, iter), nil
 }
 
+type sqaIter struct {
+	iter   sql.RowIter
+	idx    int
+	cache  []sql.Row
+	cached bool
+}
+
+var _ sql.RowIter = (*sqaIter)(nil)
+
+func (s *sqaIter) Next(ctx *sql.Context) (sql.Row, error) {
+	if s.cached {
+		if s.idx >= len(s.cache) {
+			return nil, io.EOF
+		}
+		row := s.cache[s.idx]
+		s.idx++
+		return row, nil
+	}
+	row, err := s.iter.Next(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.cache = append(s.cache, row)
+	return row, nil
+}
+
+func (s *sqaIter) Close(context *sql.Context) error {
+	s.idx = 0
+	if !s.cached {
+		s.cached = true
+		s.iter.Close(context)
+	}
+	return nil
+}
+
 func (b *BaseBuilder) buildSubqueryAlias(ctx *sql.Context, n *plan.SubqueryAlias, row sql.Row) (sql.RowIter, error) {
 	span, ctx := ctx.Span("plan.SubqueryAlias")
 
@@ -893,8 +928,11 @@ func (b *BaseBuilder) buildSubqueryAlias(ctx *sql.Context, n *plan.SubqueryAlias
 		span.End()
 		return nil, err
 	}
-
-	return sql.NewSpanIter(span, iter), nil
+	if n.CanCacheResults() {
+		iter = &sqaIter{iter: iter}
+	}
+	iter = sql.NewSpanIter(span, iter)
+	return iter, nil
 }
 
 func (b *BaseBuilder) buildSort(ctx *sql.Context, n *plan.Sort, row sql.Row) (sql.RowIter, error) {

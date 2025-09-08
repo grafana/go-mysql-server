@@ -163,7 +163,6 @@ func (j *joinOrderBuilder) useFastReorder() bool {
 		return false
 	}
 	// TODO: revert this
-	return true
 	return len(j.vertices) > 15
 }
 

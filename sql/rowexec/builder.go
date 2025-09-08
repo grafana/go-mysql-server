@@ -33,6 +33,9 @@ type ExecBuilderFunc func(ctx *sql.Context, n sql.Node, r sql.Row) (sql.RowIter,
 type BaseBuilder struct {
 	// if override is provided, we try to build executor with this first
 	override sql.NodeExecBuilder
+
+	// TODO: mutex?
+	sqaCache map[sql.Node]sql.RowIter
 }
 
 func (b *BaseBuilder) Build(ctx *sql.Context, n sql.Node, r sql.Row) (sql.RowIter, error) {
