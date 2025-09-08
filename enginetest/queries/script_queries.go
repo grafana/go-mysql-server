@@ -121,6 +121,26 @@ type ScriptTestAssertion struct {
 // the tests.
 var ScriptTests = []ScriptTest{
 	{
+		// https://github.com/dolthub/dolt/issues/9805
+		Name: "data scrambling with FULL OUTER JOIN and CROSS JOIN",
+		SetUpScript: []string{
+			"CREATE TABLE t1(c0 VARCHAR(500), c1 INT, c2 BOOLEAN);",
+			"CREATE TABLE t2(c0 INT, c1 VARCHAR(500), c2 BOOLEAN);",
+			"CREATE TABLE t3(c0 VARCHAR(500), c1 INT);",
+			"INSERT INTO t1 VALUES ('UjhU', 9, TRUE);",
+			"INSERT INTO t2 VALUES (5, 'ao', TRUE);",
+			"INSERT INTO t3 VALUES ('4GD', 6);",
+		},
+		Query: `SELECT
+  t2.c0, t2.c1, t2.c2
+FROM
+  t2 FULL OUTER JOIN t3 ON LEFT(t2.c1, 2) = t2.c1
+  CROSS JOIN (SELECT t1.c0 AS c0 FROM t1) AS vtable0;`,
+		Expected: []sql.Row{
+			{5, "ao", true},
+		},
+	},
+	{
 		// https://github.com/dolthub/dolt/issues/9794
 		Name: "UPDATE with TRIM function on TEXT column",
 		SetUpScript: []string{
