@@ -200,22 +200,21 @@ func TestSingleQueryPrepared(t *testing.T) {
 
 // Convenience test for debugging a single query. Unskip and set to the desired query.
 func TestSingleScript(t *testing.T) {
-	t.Skip()
+	//t.Skip()
 	var scripts = []queries.ScriptTest{
 		{
-			Name:        "AS OF propagates to nested CALLs",
-			SetUpScript: []string{},
+			Name: "lateral join",
+			SetUpScript: []string{
+				"create table t1 (i int);",
+				"create table t2 (j int);",
+				"insert into t1 values (1);",
+				"insert into t2 values (0);",
+			},
 			Assertions: []queries.ScriptTestAssertion{
 				{
-					Query: "create procedure create_proc() create table t (i int primary key, j int);",
+					Query: "select * from t1 cross join lateral (select 1 as k) v join t2 on v.k > t2.j;",
 					Expected: []sql.Row{
-						{types.NewOkResult(0)},
-					},
-				},
-				{
-					Query: "call create_proc()",
-					Expected: []sql.Row{
-						{types.NewOkResult(0)},
+						{1, 1, 0},
 					},
 				},
 			},
@@ -230,8 +229,8 @@ func TestSingleScript(t *testing.T) {
 			panic(err)
 		}
 
-		//engine.EngineAnalyzer().Debug = true
-		//engine.EngineAnalyzer().Verbose = true
+		engine.EngineAnalyzer().Debug = true
+		engine.EngineAnalyzer().Verbose = true
 
 		enginetest.TestScriptWithEngine(t, engine, harness, test)
 	}

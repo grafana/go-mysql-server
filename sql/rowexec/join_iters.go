@@ -766,6 +766,7 @@ func newLateralJoinIter(ctx *sql.Context, b sql.NodeExecBuilder, j *plan.JoinNod
 	}), nil
 }
 
+// TODO: should be load primary
 func (i *lateralJoinIterator) loadLeft(ctx *sql.Context) error {
 	if i.lRow == nil {
 		lRow, err := i.lIter.Next(ctx)
@@ -778,6 +779,7 @@ func (i *lateralJoinIterator) loadLeft(ctx *sql.Context) error {
 	return nil
 }
 
+// TODO: should be load secondary
 func (i *lateralJoinIterator) buildRight(ctx *sql.Context) error {
 	if i.rIter == nil {
 		prepended, _, err := transform.Node(i.rNode, plan.PrependRowInPlan(i.lRow, true))
@@ -805,9 +807,11 @@ func (i *lateralJoinIterator) loadRight(ctx *sql.Context) error {
 }
 
 func (i *lateralJoinIterator) buildRow(lRow, rRow sql.Row) sql.Row {
+	// TODO: make this like the other joins
 	row := make(sql.Row, i.rowSize)
-	copy(row, lRow)
-	copy(row[len(lRow):], rRow)
+	copy(row, i.pRow)
+	copy(row[len(i.pRow):], i.lRow)
+	copy(row[len(i.pRow)+len(i.lRow):], i.rRow)
 	return row
 }
 
