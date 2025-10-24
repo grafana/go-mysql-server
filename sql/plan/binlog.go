@@ -20,10 +20,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/vitess/go/mysql"
 	"github.com/dolthub/vitess/go/sqltypes"
 	vquery "github.com/dolthub/vitess/go/vt/proto/query"
+
+	"github.com/dolthub/go-mysql-server/sql"
 )
 
 // https://github.com/MariaDB/server/blob/11.6/sql/log_event.h#L608-L750
