@@ -39,7 +39,7 @@ jobs:
           if [ ! -z "$changes" ]; then
              echo "has-changes=true" >> $GITHUB_OUTPUT
           fi
-      - uses: EndBug/add-and-commit@v9.1.1
+      - uses: EndBug/add-and-commit@61a88be553afe4206585b31aa72387c64295d08b
         if: ${{ steps.detect-changes.outputs.has-changes == 'true' }}
         with:
           message: "[ga-format-pr] Run ./format_repo.sh to fix formatting"
