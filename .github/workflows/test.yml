@@ -14,6 +14,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        persist-credentials: false
     - name: Install Go
       uses: actions/setup-go@v5
       with:
@@ -27,7 +29,7 @@ jobs:
         echo CGO_LDFLAGS=-L$dir/lib >> $GITHUB_ENV
     - name: Install ICU4C (Windows)
       if: ${{ matrix.platform == 'windows-latest' }}
-      uses: msys2/setup-msys2@v2
+      uses: msys2/setup-msys2@4f806de0a5a7294ffabaff804b38a9b435a73bda
       with:
         path-type: inherit
         msystem: UCRT64
