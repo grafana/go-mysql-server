@@ -127,14 +127,15 @@ jobs:
         run: |
           git config --global --add user.name "${GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE}"
           git config --global --add user.email "${GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE_EMAIL}"
-          branchname=${{ format('{0}-{1}', github.event.client_payload.assignee, steps.short-sha.outputs.short) }}
+          branchname="${GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE}-${SHORT_SHA}"
           git checkout -b "$branchname"
           git add .
-          git commit -m "${{ format('[ga-bump-dep] Bump dependency in GMS by {0}', github.event.client_payload.assignee) }}"
+          git commit -m "[ga-bump-dep] Bump dependency in GMS by ${GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE}"
           git push origin "$branchname"
         env:
           GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE: ${{ github.event.client_payload.assignee }}
           GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE_EMAIL: ${{ github.event.client_payload.assignee_email }}
+          SHORT_SHA: ${{ steps.short-sha.outputs.short }}
       - name: pull-request
         uses: repo-sync/pull-request@7e79a9f5dc3ad0ce53138f01df2fad14a04831c5
         id: latest-pr
