@@ -125,7 +125,7 @@ jobs:
           git commit -m "${{ format('[ga-bump-dep] Bump dependency in GMS by {0}', github.event.client_payload.assignee) }}"
           git push origin "$branchname"
       - name: pull-request
-        uses: repo-sync/pull-request@v2
+        uses: repo-sync/pull-request@7e79a9f5dc3ad0ce53138f01df2fad14a04831c5
         id: latest-pr
         with:
           source_branch: ${{ format('{0}-{1}', github.event.client_payload.assignee, steps.short-sha.outputs.short ) }}

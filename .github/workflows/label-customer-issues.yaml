@@ -11,7 +11,7 @@ jobs:
   label_customer_issues:
     runs-on: ubuntu-latest
     steps:
-      - uses: dolthub/label-customer-issues@main
+      - uses: dolthub/label-customer-issues@0533b85a589e4f078277eed4b55523ebfbd2c7c6
         with:
           repo-token: ${{ secrets.REPO_ACCESS_TOKEN }}
           issue-label: customer issue
