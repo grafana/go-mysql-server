@@ -146,7 +146,7 @@ jobs:
           git push origin "${BRANCH}"
 
       - name: pull-request
-        uses: repo-sync/pull-request@7e79a9f5dc3ad0ce53138f01df2fad14a04831c5
+        uses: repo-sync/pull-request@v2
         id: latest-pr
         with:
           source_branch: ${{ needs.sanitize-payload.outputs.safe_branch }}
