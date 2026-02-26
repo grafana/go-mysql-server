@@ -94,50 +94,38 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
-          persist-credentials: false
       - name: Set up Go 1.x
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - name: Bump dependency
-        run: GOOS=linux go get github.com/dolthub/${GITHUB_EVENT_CLIENT_PAYLOAD_DEPENDENCY}@${GITHUB_EVENT_CLIENT_PAYLOAD_HEAD_COMMIT_SHA}
-        env:
-          GITHUB_EVENT_CLIENT_PAYLOAD_DEPENDENCY: ${{ github.event.client_payload.dependency }}
-          GITHUB_EVENT_CLIENT_PAYLOAD_HEAD_COMMIT_SHA: ${{ github.event.client_payload.head_commit_sha }}
+        run: GOOS=linux go get github.com/dolthub/${{ github.event.client_payload.dependency }}@${{ github.event.client_payload.head_commit_sha }}
       - name: Get Assignee and Reviewer
         id: get_reviewer
         run: |
-          if [ "${GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE}" == "zachmu" ]
+          if [ "${{ github.event.client_payload.assignee }}" == "zachmu" ]
           then
             echo "reviewer=Hydrocharged" >> $GITHUB_OUTPUT
           else
             echo "reviewer=zachmu" >> $GITHUB_OUTPUT
           fi
-        env:
-          GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE: ${{ github.event.client_payload.assignee }}
       - name: Get short hash
         id: short-sha
         run: |
-          commit=${GITHUB_EVENT_CLIENT_PAYLOAD_HEAD_COMMIT_SHA}
+          commit=${{ github.event.client_payload.head_commit_sha }}
           short=${commit:0:8}
           echo "short=$short" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_EVENT_CLIENT_PAYLOAD_HEAD_COMMIT_SHA: ${{ github.event.client_payload.head_commit_sha }}
       - name: Create and Push new branch
         run: |
-          git config --global --add user.name "${GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE}"
-          git config --global --add user.email "${GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE_EMAIL}"
-          branchname="${GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE}-${SHORT_SHA}"
+          git config --global --add user.name "${{ github.event.client_payload.assignee }}"
+          git config --global --add user.email "${{ github.event.client_payload.assignee_email }}"
+          branchname=${{ format('{0}-{1}', github.event.client_payload.assignee, steps.short-sha.outputs.short) }}
           git checkout -b "$branchname"
           git add .
-          git commit -m "[ga-bump-dep] Bump dependency in GMS by ${GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE}"
+          git commit -m "${{ format('[ga-bump-dep] Bump dependency in GMS by {0}', github.event.client_payload.assignee) }}"
           git push origin "$branchname"
-        env:
-          GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE: ${{ github.event.client_payload.assignee }}
-          GITHUB_EVENT_CLIENT_PAYLOAD_ASSIGNEE_EMAIL: ${{ github.event.client_payload.assignee_email }}
-          SHORT_SHA: ${{ steps.short-sha.outputs.short }}
       - name: pull-request
-        uses: repo-sync/pull-request@7e79a9f5dc3ad0ce53138f01df2fad14a04831c5
+        uses: repo-sync/pull-request@v2
         id: latest-pr
         with:
           source_branch: ${{ format('{0}-{1}', github.event.client_payload.assignee, steps.short-sha.outputs.short ) }}
