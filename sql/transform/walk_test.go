@@ -39,7 +39,7 @@ func TestWalk(t *testing.T) {
 	Walk(f, a3)
 
 	require.Equal(t,
-		[]sql.Node{a3, a2, c1, a1, nil, b1, nil, nil, nil, nil},
+		[]sql.Node{a3, a2, c1, a1, b1},
 		visited,
 	)
 
@@ -55,7 +55,7 @@ func TestWalk(t *testing.T) {
 	Walk(f, a3)
 
 	require.Equal(t,
-		[]sql.Node{a3, a2, c1, nil, nil},
+		[]sql.Node{a3, a2, c1},
 		visited,
 	)
 }
@@ -80,10 +80,10 @@ func TestInspect(t *testing.T) {
 		return true
 	}
 
-	Inspect(a3, f)
+	InspectWithOpaque(a3, f)
 
 	require.Equal(t,
-		[]sql.Node{a3, a2, c1, a1, nil, b1, nil, nil, nil, nil},
+		[]sql.Node{a3, a2, c1, a1, b1},
 		visited,
 	)
 
@@ -96,10 +96,10 @@ func TestInspect(t *testing.T) {
 		return true
 	}
 
-	Inspect(a3, f)
+	InspectWithOpaque(a3, f)
 
 	require.Equal(t,
-		[]sql.Node{a3, a2, c1, nil, nil},
+		[]sql.Node{a3, a2, c1},
 		visited,
 	)
 }

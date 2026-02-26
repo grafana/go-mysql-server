@@ -99,18 +99,6 @@ func (s *Scope) NewScopeFromSubqueryExpression(node sql.Node, corr sql.ColSet) *
 // NewScopeFromSubqueryExpression returns a new subscope created from a subquery expression contained by the specified
 // node.
 func (s *Scope) NewScopeInJoin(node sql.Node) *Scope {
-	for {
-		var done bool
-		switch n := node.(type) {
-		case *StripRowNode:
-			node = n.Child
-		default:
-			done = true
-		}
-		if done {
-			break
-		}
-	}
 	if s == nil {
 		return &Scope{joinSiblings: []sql.Node{node}}
 	}
@@ -119,12 +107,13 @@ func (s *Scope) NewScopeInJoin(node sql.Node) *Scope {
 	newNodes = append(newNodes, node)
 	newNodes = append(newNodes, s.joinSiblings...)
 	return &Scope{
-		nodes:          s.nodes,
-		Memos:          s.Memos,
-		recursionDepth: s.recursionDepth + 1,
-		Procedures:     s.Procedures,
-		joinSiblings:   newNodes,
-		corr:           s.corr,
+		nodes:                               s.nodes,
+		Memos:                               s.Memos,
+		recursionDepth:                      s.recursionDepth + 1,
+		Procedures:                          s.Procedures,
+		joinSiblings:                        newNodes,
+		corr:                                s.corr,
+		CurrentNodeIsFromSubqueryExpression: s.CurrentNodeIsFromSubqueryExpression,
 	}
 }
 
@@ -340,9 +329,15 @@ func (s *Scope) InInsertSource() bool {
 }
 
 func (s *Scope) JoinSiblings() []sql.Node {
+	if s == nil {
+		return nil
+	}
 	return s.joinSiblings
 }
 
 func (s *Scope) Correlated() sql.ColSet {
+	if s == nil {
+		return sql.ColSet{}
+	}
 	return s.corr
 }

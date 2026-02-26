@@ -39,8 +39,6 @@ func Walk(v Visitor, node sql.Node) {
 	for _, child := range node.Children() {
 		Walk(v, child)
 	}
-
-	v.Visit(nil)
 }
 
 type inspector func(sql.Node) bool
@@ -52,17 +50,59 @@ func (f inspector) Visit(node sql.Node) Visitor {
 	return nil
 }
 
-// Inspect traverses the plan in depth-first order: It starts by calling
-// f(node); node must not be nil. If f returns true, Inspect invokes f
-// recursively for each of the children of node, followed by a call of
-// f(nil).
-func Inspect(node sql.Node, f func(sql.Node) bool) {
-	Walk(inspector(f), node)
+// Inspect performs a pre-order traversal of the sql.Node tree, excluding children of sql.OpaqueNodes
+// First, it does f(node) and if cont = true, then InspectWithOpaque is recursively called on node's children.
+// TODO: this conflicts with transform.InspectExpr which performs a post-order traversal and stops when stop = true.
+func Inspect(node sql.Node, f func(sql.Node) bool) (cont bool) {
+	if !f(node) {
+		return false
+	}
+
+	if _, ok := node.(sql.OpaqueNode); ok {
+		return false
+	}
+
+	// Avoid allocating []sql.Expression
+	switch n := node.(type) {
+	case sql.UnaryNode:
+		Inspect(n.Child(), f)
+	case sql.BinaryNode:
+		Inspect(n.Left(), f)
+		Inspect(n.Right(), f)
+	default:
+		for _, child := range n.Children() {
+			Inspect(child, f)
+		}
+	}
+	return true
+}
+
+// InspectWithOpaque performs a pre-order traversal of the sql.Node tree, including children of sql.OpaqueNodes.
+// First, it does f(node) and if cont = true, then InspectWithOpaque is recursively called on node's children.
+// TODO: this conflicts with transform.InspectExpr which performs a post-order traversal and stops when stop = true.
+func InspectWithOpaque(node sql.Node, f func(sql.Node) bool) (cont bool) {
+	if !f(node) {
+		return false
+	}
+
+	// Avoid allocating []sql.Expression
+	switch n := node.(type) {
+	case sql.UnaryNode:
+		InspectWithOpaque(n.Child(), f)
+	case sql.BinaryNode:
+		InspectWithOpaque(n.Left(), f)
+		InspectWithOpaque(n.Right(), f)
+	default:
+		for _, child := range n.Children() {
+			InspectWithOpaque(child, f)
+		}
+	}
+	return true
 }
 
 // WalkExpressions traverses the plan and calls sql.Walk on any expression it finds.
 func WalkExpressions(v sql.Visitor, node sql.Node) {
-	Inspect(node, func(node sql.Node) bool {
+	InspectWithOpaque(node, func(node sql.Node) bool {
 		if n, ok := node.(sql.Expressioner); ok {
 			for _, e := range n.Expressions() {
 				sql.Walk(v, e)
@@ -74,7 +114,7 @@ func WalkExpressions(v sql.Visitor, node sql.Node) {
 
 // WalkExpressionsWithNode traverses the plan and calls sql.WalkWithNode on any expression it finds.
 func WalkExpressionsWithNode(v sql.NodeVisitor, n sql.Node) {
-	Inspect(n, func(n sql.Node) bool {
+	InspectWithOpaque(n, func(n sql.Node) bool {
 		if expressioner, ok := n.(sql.Expressioner); ok {
 			for _, e := range expressioner.Expressions() {
 				sql.WalkWithNode(v, n, e)
@@ -84,8 +124,8 @@ func WalkExpressionsWithNode(v sql.NodeVisitor, n sql.Node) {
 	})
 }
 
-// InspectExpressions traverses the plan and calls sql.Inspect on any
-// expression it finds.
+// InspectExpressions traverses every node through sql.InspectWithOpaque, and calls the `f` on expressions returned from
+// sql.Expressioner.Expressions().
 func InspectExpressions(node sql.Node, f func(sql.Expression) bool) {
 	WalkExpressions(exprInspector(f), node)
 }
@@ -99,7 +139,8 @@ func (f exprInspector) Visit(e sql.Expression) sql.Visitor {
 	return nil
 }
 
-// InspectExpressionsWithNode traverses the plan and calls sql.Inspect on any expression it finds.
+// InspectExpressionsWithNode traverses every node through sql.InspectWithOpaque, and calls the `f` on expressions
+// returned from sql.Expressioner.Expressions().
 func InspectExpressionsWithNode(node sql.Node, f func(sql.Node, sql.Expression) bool) {
 	WalkExpressionsWithNode(exprWithNodeInspector(f), node)
 }

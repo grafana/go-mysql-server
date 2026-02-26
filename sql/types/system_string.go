@@ -33,6 +33,7 @@ type systemStringType struct {
 
 var _ sql.SystemVariableType = systemStringType{}
 var _ sql.CollationCoercible = systemStringType{}
+var _ sql.StringType = systemStringType{}
 
 // NewSystemStringType returns a new systemStringType.
 func NewSystemStringType(varName string) sql.SystemVariableType {
@@ -70,7 +71,7 @@ func (t systemStringType) Convert(c context.Context, v interface{}) (interface{}
 		return value, sql.InRange, nil
 	}
 
-	return nil, sql.OutOfRange, sql.ErrInvalidSystemVariableValue.New(t.varName, v)
+	return nil, sql.InRange, sql.ErrInvalidSystemVariableValue.New(t.varName, v)
 }
 
 // Equals implements the Type interface.
@@ -148,4 +149,34 @@ func (t systemStringType) DecodeValue(val string) (interface{}, error) {
 
 func (t systemStringType) UnderlyingType() sql.Type {
 	return LongText
+}
+
+// CharacterSet implements sql.StringType interface
+func (t systemStringType) CharacterSet() sql.CharacterSetID {
+	return LongText.CharacterSet()
+}
+
+// Collation implements sql.StringType interface
+func (t systemStringType) Collation() sql.CollationID {
+	return LongText.Collation()
+}
+
+// IsStringType implements sql.StringType interface
+func (t systemStringType) IsStringType() bool {
+	return true
+}
+
+// MaxCharacterLength implements sql.StringType interface
+func (t systemStringType) MaxCharacterLength() int64 {
+	return LongText.MaxCharacterLength()
+}
+
+// MaxByteLength implements sql.StringType interface
+func (t systemStringType) MaxByteLength() int64 {
+	return LongText.MaxByteLength()
+}
+
+// Length implements sql.StringType interface
+func (t systemStringType) Length() int64 {
+	return LongText.Length()
 }

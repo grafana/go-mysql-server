@@ -29,10 +29,6 @@ import (
 // apply, effectively, an indexed join between two tables, one of which is defined in the outer scope. This is similar
 // to the process in the join analyzer.
 func applyIndexesFromOuterScope(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scope, sel RuleSelector, qFlags *sql.QueryFlags) (sql.Node, transform.TreeIdentity, error) {
-	if scope.IsEmpty() {
-		return n, transform.SameTree, nil
-	}
-
 	// this isn't good enough: we need to consider aliases defined in the outer scope as well for this analysis
 	tableAliases, err := getTableAliases(n, scope)
 	if err != nil {
@@ -136,7 +132,7 @@ func getOuterScopeIndexes(
 	var exprsByTable joinExpressionsByTable
 
 	var err error
-	transform.Inspect(node, func(node sql.Node) bool {
+	transform.InspectWithOpaque(node, func(node sql.Node) bool {
 		switch node := node.(type) {
 		case *plan.Filter:
 
@@ -194,7 +190,7 @@ func createIndexKeyExpr(ctx *sql.Context, idx sql.Index, joinExprs []*joinColExp
 	idxExpressions := idx.Expressions()
 	normalizedJoinExprStrs := make([]string, len(joinExprs))
 	for i := range joinExprs {
-		normalizedJoinExprStrs[i] = normalizeExpression(tableAliases, joinExprs[i].colExpr).String()
+		normalizedJoinExprStrs[i] = normalizeExpression(tableAliases, nil, joinExprs[i].colExpr).String()
 	}
 	if ok, prefixCount := exprsAreIndexSubset(normalizedJoinExprStrs, idxExpressions); !ok || prefixCount != len(normalizedJoinExprStrs) {
 		return nil, nil, nil
@@ -260,11 +256,16 @@ func getSubqueryIndexes(
 	result := make(map[string]sql.Index)
 	// For every predicate involving a table in the outer scope, see if there's an index lookup possible on its comparands
 	// (the tables in this scope)
+	// TODO: As written, this only looks at a single outer scope.
+	// This prevents optimization when we need to get predicates from multiple outer scopes like:
+	// select * from ab ab1 where exists
+	//     (select * from ab ab2 join lateral
+	//         (select * from two_pk where pk1 = ab1.a and pk2 = ab2.a) inner1)`
 	for _, scopeTable := range tablesInScope {
 		indexCols := exprsByTable[scopeTable]
 		if indexCols != nil {
 			col := indexCols[0].comparandCol
-			idx := ia.MatchingIndex(ctx, col.Table(), col.Database(), normalizeExpressions(tableAliases, extractComparands(indexCols)...)...)
+			idx := ia.MatchingIndex(ctx, col.Table(), col.Database(), normalizeExpressions(tableAliases, nil, extractComparands(indexCols)...)...)
 			if idx != nil {
 				result[indexCols[0].comparandCol.Table()] = idx
 			}
@@ -279,6 +280,11 @@ func tablesInScope(scope *plan.Scope) []string {
 	for _, node := range scope.InnerToOuter() {
 		for _, col := range Schemas(node.Children()) {
 			tables[col.Source] = true
+		}
+	}
+	for _, table := range scope.JoinSiblings() {
+		for name, _ := range getNamedChildren(table) {
+			tables[name] = true
 		}
 	}
 	var tableSlice []string
@@ -392,53 +398,21 @@ func extractJoinColumnExpr(e sql.Expression) (leftCol *joinColExpr, rightCol *jo
 	}
 }
 
-func containsColumns(e sql.Expression) bool {
-	var result bool
-	sql.Inspect(e, func(e sql.Expression) bool {
-		_, ok1 := e.(*expression.GetField)
-		_, ok2 := e.(*expression.UnresolvedColumn)
-		if ok1 || ok2 {
-			result = true
-			return false
-		}
-		return true
-	})
-	return result
-}
-
-func containsSubquery(e sql.Expression) bool {
-	var result bool
-	sql.Inspect(e, func(e sql.Expression) bool {
-		if _, ok := e.(*plan.Subquery); ok {
-			result = true
-			return false
-		}
-		return true
-	})
-	return result
-}
-
+// isEvaluable determines if sql.Expression has/contains columns, subqueries, bindvars, or procedure params.
+// Those expressions are NOT evaluable.
 func isEvaluable(e sql.Expression) bool {
-	return !containsColumns(e) && !containsSubquery(e) && !containsBindvars(e) && !containsProcedureParam(e)
-}
-
-func containsBindvars(e sql.Expression) bool {
-	var result bool
+	var hasUnevaluable bool
 	sql.Inspect(e, func(e sql.Expression) bool {
-		if _, ok := e.(*expression.BindVar); ok {
-			result = true
+		switch e.(type) {
+		case *expression.GetField, *expression.UnresolvedColumn,
+			*plan.Subquery,
+			*expression.BindVar,
+			*expression.ProcedureParam:
+			hasUnevaluable = true
 			return false
+		default:
+			return true
 		}
-		return true
 	})
-	return result
-}
-
-func containsProcedureParam(e sql.Expression) bool {
-	var result bool
-	sql.Inspect(e, func(e sql.Expression) bool {
-		_, result = e.(*expression.ProcedureParam)
-		return !result
-	})
-	return result
+	return !hasUnevaluable
 }

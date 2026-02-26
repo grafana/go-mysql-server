@@ -103,8 +103,8 @@ var Comp_index_tablesData = []SetupScript{{
 	`create table pref_index_t1 (i int primary key, v1 text, v2 text, unique index (v1(3),v2(5)));`,
 	`create table pref_index_t3 (v1 varchar(10), v2 varchar(10), unique index (v1(3),v2(5)));`,
 	`create table pref_index_t4 (i int primary key, v1 varchar(10), v2 varchar(10), unique index (v1(3),v2(5)));`,
-	`CREATE TABLE comp_vector_index_t0 (pk BIGINT PRIMARY KEY, v1 BIGINT, v2 JSON);`,
-	`INSERT INTO comp_vector_index_t0 VALUES (0,0,"[3,16]"),(1,2,"[65,9]"),(2,3,"[38,37]"),(3,3,"[99,99]"),(4,5,"[17,42]"),(5,6,"[6,76]"),(6,6,"[81,33]"),
+	`CREATE TABLE comp_vector_index_t0 (pk BIGINT PRIMARY KEY, v1 BIGINT, json_column JSON NOT NULL, vector_column VECTOR(2) NOT NULL GENERATED ALWAYS AS (STRING_TO_VECTOR(json_column)) STORED);`,
+	`INSERT INTO comp_vector_index_t0 (pk, v1, json_column) VALUES (0,0,"[3,16]"),(1,2,"[65,9]"),(2,3,"[38,37]"),(3,3,"[99,99]"),(4,5,"[17,42]"),(5,6,"[6,76]"),(6,6,"[81,33]"),
 (7,7,"[33,51]"),(8,7,"[37,42]"),(9,8,"[9,21]"),(10,8,"[37,90]"),(11,9,"[39,20]"),(12,9,"[71,82]"),(13,10,"[16,21]"),(14,10,"[32,46]"),(15,10,"[47,36]"),
 (16,12,"[44,84]"),(17,12,"[66,40]"),(18,13,"[47,30]"),(19,13,"[56,41]"),(20,14,"[38,24]"),(21,14,"[91,1]"),(22,15,"[2,69]"),(23,16,"[40,36]"),
 (24,20,"[29,93]"),(25,21,"[9,89]"),(26,21,"[42,76]"),(27,23,"[13,53]"),(28,23,"[28,68]"),(29,23,"[28,90]"),(30,23,"[30,44]"),(31,24,"[20,8]"),
@@ -117,7 +117,24 @@ var Comp_index_tablesData = []SetupScript{{
 (80,75,"[91,35]"),(81,76,"[40,52]"),(82,76,"[44,87]"),(83,81,"[32,4]"),(84,82,"[11,6]"),(85,82,"[46,32]"),(86,84,"[40,8]"),(87,84,"[93,37]"),
 (88,85,"[53,50]"),(89,86,"[63,79]"),(90,87,"[22,34]"),(91,87,"[57,62]"),(92,88,"[88,42]"),(93,90,"[30,67]"),(94,91,"[15,15]"),(95,93,"[7,26]"),
 (96,94,"[92,38]"),(97,95,"[89,66]"),(98,97,"[63,19]"),(99,98,"[31,21]"),(100,98,"[42,22]")`,
-	`create VECTOR INDEX v_idx on comp_vector_index_t0 (v2)`,
+	`create VECTOR INDEX v_idx_json on comp_vector_index_t0 (json_column)`,
+	`create VECTOR INDEX v_idx_vec on comp_vector_index_t0 (vector_column)`,
+	`create table three_pk (
+    pk1 tinyint,
+    pk2 tinyint,
+    pk3 tinyint,
+    c1 tinyint NOT NULL,
+    c2 tinyint NOT NULL,
+    c3 tinyint NOT NULL,
+    c4 tinyint NOT NULL,
+    c5 tinyint NOT NULL,
+    primary key (pk1, pk2, pk3)
+)`,
+	`insert into three_pk values
+    (0,0,0,0,1,2,3,4),
+    (0,1,10,20,11,12,13,14),
+    (1,0,20,40,21,22,23,24),
+    (1,1,30,60,31,32,33,34)`,
 }}
 
 var DatetimetableData = []SetupScript{{
@@ -215,6 +232,11 @@ var Graph_tablesData = []SetupScript{{
 	('filling', 'fruit', 9),
 	('filling', 'salt', 3),
 	('filling', 'butter', 3)`,
+}}
+
+var Id_parentData = []SetupScript{{
+	`create table id_parent(id varchar(255), parent varchar(255), primary key (id));`,
+	`analyze table id_parent update histogram on (id) using data '{"row_count": 28000}';`,
 }}
 
 var ImdbData = []SetupScript{{
@@ -392,6 +414,25 @@ var ImdbData = []SetupScript{{
 	`create index person_role_id_cast_info on cast_info(person_role_id);`,
 	`create index role_id_cast_info on cast_info(role_id);`,
 	`analyze table aka_name update histogram on id using data '{"row_count": 900662}';`,
+	`analyze table aka_title update histogram on id using data '{"row_count": 361376}';`,
+	`analyze table cast_info update histogram on id using data '{"row_count": 36124530}';`,
+	`analyze table char_name update histogram on id using data '{"row_count": 3136382}';`,
+	`analyze table company_name update histogram on id using data '{"row_count": 234825}';`,
+	`analyze table company_type update histogram on id using data '{"row_count": 4}';`,
+	`analyze table complete_cast update histogram on id using data '{"row_count": 135086}';`,
+	`analyze table comp_cast_type update histogram on id using data '{"row_count": 4}';`,
+	`analyze table info_type update histogram on id using data '{"row_count": 113}';`,
+	`analyze table keyword update histogram on id using data '{"row_count": 134110}';`,
+	`analyze table kind_type update histogram on id using data '{"row_count": 7}';`,
+	`analyze table link_type update histogram on id using data '{"row_count": 18}';`,
+	`analyze table movie_companies update histogram on id using data '{"row_count": 2604067}';`,
+	`analyze table movie_info update histogram on id using data '{"row_count": 14355706}';`,
+	`analyze table movie_info_idx update histogram on id using data '{"row_count": 1380035}';`,
+	`analyze table movie_keyword update histogram on id using data '{"row_count": 4523930}';`,
+	`analyze table movie_link update histogram on id using data '{"row_count": 29997}';`,
+	`analyze table name update histogram on id using data '{"row_count": 4167453}';`,
+	`analyze table person_info update histogram on id using data '{"row_count": 2024951}';`,
+	`analyze table title update histogram on id using data '{"row_count": 2527799}';`,
 }}
 
 var Integration_testData = []SetupScript{{
@@ -3869,8 +3910,16 @@ var TypestableData = []SetupScript{{
 }}
 
 var ViewsData = []SetupScript{{
-	`CREATE VIEW myview1 AS SELECT * FROM myhistorytable`,
-	`CREATE VIEW myview2 AS SELECT * FROM myview WHERE i = 1`,
+	`CREATE TABLE three_pks(pk1 INT, pk2 INT, pk3 INT, PRIMARY KEY (pk1, pk2, pk3))`,
+	`CREATE VIEW three_pks_view AS SELECT * FROM three_pks WHERE pk1 = 1`,
+	`CREATE VIEW view_in_view AS SELECT * FROM three_pks_view WHERE pk2 = 1`,
+	`CREATE VIEW three_pks_projection_view AS SELECT pk2 as pk1, pk3 as pk2 FROM three_pks WHERE three_pks.pk1 = 1`,
+	`CREATE VIEW projection_view_in_view AS SELECT pk2 as pk FROM three_pks_projection_view WHERE pk1 = 1`,
+	`CREATE VIEW join_view AS SELECT l.pk1, r.pk2 FROM three_pks l JOIN three_pks r WHERE l.pk2 = r.pk1`,
+	`CREATE VIEW join_view_in_view AS SELECT * FROM join_view WHERE pk1 = 1`,
+	`CREATE VIEW where_exists_view AS SELECT * FROM three_pks l WHERE EXISTS (SELECT * FROM three_pks r WHERE l.pk2 = r.pk1)`,
+	`CREATE VIEW where_exists_view_in_view AS SELECT * FROM where_exists_view WHERE pk1 = 1`,
+	`CREATE VIEW join_view_requires_prefix AS SELECT l.pk1 as left_pk, r.pk1 as right_pk FROM three_pks l JOIN three_pks r WHERE l.pk2 = r.pk2`,
 }}
 
 var XyData = []SetupScript{{

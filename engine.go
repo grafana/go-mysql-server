@@ -194,17 +194,17 @@ func New(a *analyzer.Analyzer, cfg *Config) *Engine {
 		PreparedDataCache: NewPreparedDataCache(),
 		mu:                &sync.Mutex{},
 		EventScheduler:    nil,
-		Parser:            sql.GlobalParser,
+		Parser:            sql.GetParser(a.Overrides),
 	}
 	ret.ReadOnly.Store(cfg.IsReadOnly)
 	a.Runner = ret
+	a.ExecBuilder.Runner = ret
 	return ret
 }
 
 // NewDefault creates a new default Engine.
 func NewDefault(pro sql.DatabaseProvider) *Engine {
-	a := analyzer.NewDefaultWithVersion(pro)
-	return New(a, nil)
+	return New(analyzer.NewDefault(pro), nil)
 }
 
 // AnalyzeQuery analyzes a query and returns its sql.Node
@@ -212,7 +212,7 @@ func (e *Engine) AnalyzeQuery(
 	ctx *sql.Context,
 	query string,
 ) (sql.Node, error) {
-	binder := planbuilder.New(ctx, e.Analyzer.Catalog, e.EventScheduler, e.Parser)
+	binder := planbuilder.New(ctx, e.Analyzer.Catalog, e.EventScheduler)
 	parsed, _, _, qFlags, err := binder.Parse(query, nil, false)
 	if err != nil {
 		return nil, err
@@ -243,7 +243,7 @@ func (e *Engine) PrepareParsedQuery(
 	// Make sure there is an active transaction if one hasn't been started yet
 	e.beginTransaction(ctx)
 
-	binder := planbuilder.New(ctx, e.Analyzer.Catalog, e.EventScheduler, e.Parser)
+	binder := planbuilder.New(ctx, e.Analyzer.Catalog, e.EventScheduler)
 	node, _, err := binder.BindOnly(stmt, query, nil)
 
 	if err != nil {
@@ -526,7 +526,7 @@ func (e *Engine) BoundQueryPlan(ctx *sql.Context, query string, parsed sqlparser
 
 	query = sql.RemoveSpaceAndDelimiter(query, ';')
 
-	binder := planbuilder.New(ctx, e.Analyzer.Catalog, e.EventScheduler, e.Parser)
+	binder := planbuilder.New(ctx, e.Analyzer.Catalog, e.EventScheduler)
 	binder.SetBindings(bindings)
 
 	// Begin a transaction if necessary (no-op if one is in flight)
@@ -580,7 +580,7 @@ func (e *Engine) preparedStatement(ctx *sql.Context, query string, parsed sqlpar
 		preparedAst, preparedDataFound = e.PreparedDataCache.GetCachedStmt(ctx.Session.ID(), query)
 	}
 
-	binder := planbuilder.New(ctx, e.Analyzer.Catalog, e.EventScheduler, e.Parser)
+	binder := planbuilder.New(ctx, e.Analyzer.Catalog, e.EventScheduler)
 	if preparedDataFound {
 		parsed = preparedAst
 		binder.SetBindings(bindings)
@@ -872,7 +872,7 @@ func (e *Engine) executeEvent(ctx *sql.Context, dbName, createEventStatement, us
 func findCreateEventNode(planTree sql.Node) (*plan.CreateEvent, error) {
 	// Search through the node to find the first CREATE EVENT node, and then grab its body
 	var targetNode sql.Node
-	transform.Inspect(planTree, func(node sql.Node) bool {
+	transform.InspectWithOpaque(planTree, func(node sql.Node) bool {
 		if cen, ok := node.(*plan.CreateEvent); ok {
 			targetNode = cen
 			return false

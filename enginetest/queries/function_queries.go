@@ -911,7 +911,113 @@ var FunctionQueryTests = []QueryTest{
 		Query:    "SELECT TIMESTAMPDIFF(SECOND, null, '2007-12-31 00:00:00');",
 		Expected: []sql.Row{{nil}},
 	},
-
+	// TIMESTAMPDIFF YEAR tests https://github.com/dolthub/dolt/issues/10393
+	{
+		Query:    "SELECT TIMESTAMPDIFF(YEAR, DATE '2011-07-05', DATE '2026-07-04')",
+		Expected: []sql.Row{{14}},
+	},
+	{
+		Query:    "SELECT TIMESTAMPDIFF(YEAR, DATE '2026-07-04', DATE '2011-07-05')",
+		Expected: []sql.Row{{-14}},
+	},
+	{
+		Query:    "SELECT TIMESTAMPDIFF(YEAR, DATE '2026-07-05', DATE '2026-07-04')",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "SELECT TIMESTAMPDIFF(YEAR, DATE '2026-07-04', DATE '2026-07-05')",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "SELECT TIMESTAMPDIFF(YEAR, DATE '2025-07-04', DATE '2026-07-03')",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "SELECT TIMESTAMPDIFF(YEAR, DATE '2026-07-03', DATE '2025-07-04')",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    `select timestampdiff(year, "0050-01-01", "2020-01-01");`,
+		Expected: []sql.Row{{1970}},
+	},
+	{
+		Query:    "select timestampdiff(year, '0000-01-01', '9999-12-31 23:59:59.999999');",
+		Expected: []sql.Row{{9999}},
+	},
+	// TIMESTAMPDIFF MONTH tests https://github.com/dolthub/dolt/issues/10393
+	{
+		Query:    `select timestampdiff(year, "2000-12-25", "2020-2-20");`,
+		Expected: []sql.Row{{19}},
+	},
+	{
+		Query:    "SELECT TIMESTAMPDIFF(month, DATE '2011-07-05', DATE '2026-07-04')",
+		Expected: []sql.Row{{179}},
+	},
+	{
+		Query:    "SELECT TIMESTAMPDIFF(month, DATE '2026-07-04', DATE '2011-07-05')",
+		Expected: []sql.Row{{-179}},
+	},
+	{
+		Query:    `select timestampdiff(month, "2000-12-25", "2020-2-20");`,
+		Expected: []sql.Row{{229}},
+	},
+	{
+		Query:    `select timestampdiff(month, "0050-01-01", "2020-01-01");`,
+		Expected: []sql.Row{{23640}},
+	},
+	{
+		Query:    "select timestampdiff(month, '0000-01-01', '9999-12-31 23:59:59.999999');",
+		Expected: []sql.Row{{119999}},
+	},
+	// TIMESTAMPDIFF QUARTER tests https://github.com/dolthub/dolt/issues/10393
+	{
+		Query:    "SELECT TIMESTAMPDIFF(quarter, DATE '2011-07-05', DATE '2026-07-04')",
+		Expected: []sql.Row{{59}},
+	},
+	{
+		Query:    "SELECT TIMESTAMPDIFF(quarter, DATE '2026-07-04', DATE '2011-07-05')",
+		Expected: []sql.Row{{-59}},
+	},
+	{
+		Query:    `select timestampdiff(quarter, "0050-01-01", "2020-01-01");`,
+		Expected: []sql.Row{{7880}},
+	},
+	{
+		Query:    `select timestampdiff(quarter, "2000-12-25", "2020-2-20");`,
+		Expected: []sql.Row{{76}},
+	},
+	{
+		Query:    "select timestampdiff(quarter, '0000-01-01', '9999-12-31 23:59:59.999999');",
+		Expected: []sql.Row{{39999}},
+	},
+	// TIMESTAMPDIFF tests for large timestamp differences // https://github.com/dolthub/dolt/issues/10397
+	// 0000-03-01 is used here instead of 0000-01-01 because 0000 is a leap year in Go (ie 0000-02-29 is a valid date),
+	// but not in MySQL. As a result, date differences between any day before 0000-02-29 and any after are off by one
+	// day.
+	{
+		Query:    "select timestampdiff(microsecond, '0000-03-01', '9999-12-31 23:59:59.999999');",
+		Expected: []sql.Row{{315564335999999999}},
+	},
+	{
+		Query:    "select timestampdiff(second, '0000-03-01', '9999-12-31 23:59:59.999999');",
+		Expected: []sql.Row{{315564335999}},
+	},
+	{
+		Query:    "select timestampdiff(minute, '0000-03-01', '9999-12-31 23:59:59.999999');",
+		Expected: []sql.Row{{5259405599}},
+	},
+	{
+		Query:    "select timestampdiff(hour, '0000-03-01', '9999-12-31 23:59:59.999999');",
+		Expected: []sql.Row{{87656759}},
+	},
+	{
+		Query:    "select timestampdiff(day, '0000-03-01', '9999-12-31 23:59:59.999999');",
+		Expected: []sql.Row{{3652364}},
+	},
+	{
+		Query:    "select timestampdiff(week, '0000-03-01', '9999-12-31 23:59:59.999999');",
+		Expected: []sql.Row{{521766}},
+	},
 	// TRIM Function Tests
 	{
 		Query:    `SELECT TRIM(mytable.s) AS s FROM mytable`,
@@ -1601,11 +1707,82 @@ var FunctionQueryTests = []QueryTest{
 		Query:    "select abs(-i) from mytable order by 1",
 		Expected: []sql.Row{{1}, {2}, {3}},
 	},
-
+	// https://github.com/dolthub/dolt/issues/9735
+	{
+		Query:                 "select log('10asdf', '100f')",
+		Expected:              []sql.Row{{float64(2)}},
+		ExpectedWarningsCount: 2,
+	},
+	{
+		Query:                 "select log('a10asdf', 'b100f')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarningsCount: 2,
+	},
+	// https://github.com/dolthub/dolt/issues/10171
+	{
+		Query:                 "select abs('hi')",
+		Expected:              []sql.Row{{float64(0)}},
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select abs('12.3hi')",
+		Expected:              []sql.Row{{12.3}},
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select abs('-342.12hi')",
+		Expected:              []sql.Row{{342.12}},
+		ExpectedWarningsCount: 1,
+	},
+	// https://github.com/dolthub/dolt/issues/10270
+	{
+		Query:    "select abs(1 and true)",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select abs(true)",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select abs(2 and true)",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select abs(false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select abs(false or 2)",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select abs(date('2020-12-15'))",
+		Expected: []sql.Row{{float64(20201215)}},
+		// https://github.com/dolthub/dolt/issues/10278
+		Skip: true,
+	},
+	{
+		Query:    "select abs(time('12:23:43'))",
+		Expected: []sql.Row{{float64(122343)}},
+		// https://github.com/dolthub/dolt/issues/10278
+		Skip: true,
+	},
 	// Date Manipulation Function Tests
 	{
 		Query:    "SELECT TIMESTAMPADD(DAY, 1, '2018-05-02')",
 		Expected: []sql.Row{{"2018-05-03"}},
+	},
+	{
+		Query:                 "select timestampadd(day, 1, '0000-00-00')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select timestampadd(day, 1, 0)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
 	},
 	{
 		Query:    "SELECT DATE_ADD('2018-05-02', INTERVAL 1 day)",
@@ -1618,6 +1795,18 @@ var FunctionQueryTests = []QueryTest{
 	{
 		Query:    "select date_add(time('12:13:14'), interval 1 minute);",
 		Expected: []sql.Row{{types.Timespan(44054000000)}},
+	},
+	{
+		Query:                 "select date_add(0, interval 1 day)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select date_sub(0, interval 1 day)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
 	},
 	{
 		Query:    "SELECT DATE_SUB('2018-05-02', INTERVAL 1 DAY)",
@@ -1662,6 +1851,42 @@ var FunctionQueryTests = []QueryTest{
 	{
 		Query:    "SELECT DATE_ADD('9999-12-31 23:59:59', INTERVAL 1 DAY)",
 		Expected: []sql.Row{{nil}},
+	},
+	{
+		Query:                 "select 0 + interval 1 day",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select 0 - interval 1 day",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select datediff(0, '2020-10-10')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select datediff('0000-00-00', '2020-10-10')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select datediff('2020-10-10', 0)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select datediff('2020-10-10', '0000-00-00')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
 	},
 	{
 		Query:    "SELECT EXTRACT(DAY FROM '9999-12-31 23:59:59')",
@@ -1755,17 +1980,642 @@ var FunctionQueryTests = []QueryTest{
 			{uint32(1000)},
 		},
 	},
-}
-
-// BrokenFunctionQueryTests contains SQL function call queries that don't match MySQL behavior
-var BrokenFunctionQueryTests = []QueryTest{
-	// https://github.com/dolthub/dolt/issues/9735
+	// date-related functions
 	{
-		Query:    "select log('10asdf', '100f')",
-		Expected: []sql.Row{{float64(2)}},
+		Query:    "select day(0)",
+		Expected: []sql.Row{{0}},
 	},
 	{
-		Query:    "select log('a10asdf', 'b100f')",
-		Expected: []sql.Row{{nil}},
+		Query:    "select day(false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:                 "select day(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select day('0000-00-00')",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select day('0000-01-01')",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:                 "select dayname(0)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select dayname(false)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select dayname(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select dayname('0000-00-00')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query: "select dayname('0000-01-01')",
+		// This is Sunday in MySQL. It seems like Go's time library considers 0000-02-29 a valid date but MySQL does
+		// not. This is why the days of the week are off. 0000 is not a real year anyway. This test is to make sure
+		// 0000-01-01 is not interpreted as zero time
+		Expected: []sql.Row{{"Saturday"}},
+	},
+	{
+		Query:    "select dayname('2025-11-13')",
+		Expected: []sql.Row{{"Thursday"}},
+	},
+	{
+		Query:    "select dayofmonth(0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select dayofmonth(false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:                 "select dayofmonth(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select dayofmonth('0000-00-00')",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select dayofmonth('0000-01-01')",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:                 "select dayofweek(0)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select dayofweek(false)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select dayofweek(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select dayofweek('0000-00-00')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query: "select dayofweek('0000-01-01')",
+		// This is 1 (Sunday) in MySQL. It seems like Go's time library considers 0000-02-29 a valid date but MySQL does
+		// not. This is why the days of the week are off. 0000 is not a real year anyway. This test is to make sure
+		// 0000-01-01 is not interpreted as zero time
+		Expected: []sql.Row{{7}},
+	},
+	{
+		Query:    "select dayofweek('2025-11-13')",
+		Expected: []sql.Row{{5}},
+	},
+	{
+		Query:                 "select dayofyear(0)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select dayofyear(false)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select dayofyear(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select dayofyear('0000-00-00')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select dayofyear('0000-01-01')",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select month(0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select month(false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:                 "select month(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select month('0000-00-00')",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select month('0000-01-01')",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:                 "select monthname(0)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select monthname(false)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select monthname(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select monthname('0000-00-00')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select monthname('0000-01-01')",
+		Expected: []sql.Row{{"January"}},
+	},
+	{
+		Query:                 "select week(0)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select week(false)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select week(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select week('0000-00-00')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select week('0000-01-01')",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:                 "select weekday(0)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select weekday(false)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select weekday(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select weekday('0000-00-00')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query: "select weekday('0000-01-01')",
+		// This is 6 (Sunday) in MySQL. It seems like Go's time library considers 0000-02-29 a valid date but MySQL does
+		// not. This is why the days of the week are off. 0000 is not a real year anyway. This test is to make sure
+		// 0000-01-01 is not interpreted as zero time
+		Expected: []sql.Row{{5}},
+	},
+	{
+		Query:    "select weekday('2025-11-13')",
+		Expected: []sql.Row{{3}},
+	},
+	{
+		Query:                 "select weekofyear(0)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select weekofyear(false)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select weekofyear(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select weekofyear('0000-00-00')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select weekofyear('0000-01-01')",
+		Expected: []sql.Row{{52}},
+	},
+	{
+		Query:                 "select yearweek(0)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select yearweek(false)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select yearweek(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:                 "select yearweek('0000-00-00')",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select yearweek('0000-01-01')",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select quarter(0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select quarter(false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:                 "select quarter(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select quarter('0000-00-00')",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select quarter('0000-01-01')",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select date('0000-01-01')",
+		Expected: []sql.Row{{"0000-01-01"}},
+	},
+	{
+		Query:    "select date('0000-00-00')",
+		Expected: []sql.Row{{"0000-00-00"}},
+	},
+	{
+		Query:    "select date(0)",
+		Expected: []sql.Row{{"0000-00-00"}},
+	},
+	{
+		Query:    "select date(false)",
+		Expected: []sql.Row{{"0000-00-00"}},
+	},
+	{
+		Query:                 "select date(true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select extract(day from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(day from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:                 "select extract(day from true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query: "select extract(week from 0)",
+		// This is 613566757 in MySQL but that value seems related to this bug https://bugs.mysql.com/bug.php?id=71414&files=1
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query: "select extract(week from false)",
+		// This is 613566757 in MySQL but that value seems related to this bug https://bugs.mysql.com/bug.php?id=71414&files=1
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:                 "select extract(week from true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select extract(month from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(month from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:                 "select extract(month from true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select extract(quarter from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(quarter from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:                 "select extract(quarter from true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select extract(year from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(year from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:                 "select extract(year from true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select extract(year_month from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(year_month from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:                 "select extract(year_month from true)",
+		Expected:              []sql.Row{{nil}},
+		ExpectedWarning:       mysql.ERTruncatedWrongValue,
+		ExpectedWarningsCount: 1,
+	},
+	{
+		Query:    "select extract(day_microsecond from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(day_microsecond from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(day_microsecond from true)",
+		Expected: []sql.Row{{1000000}},
+	},
+	{
+		Query:    "select extract(day_second from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(day_second from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(day_second from true)",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select extract(day_minute from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(day_minute from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(day_minute from true)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(day_hour from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(day_hour from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(day_hour from true)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(second_microsecond from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(second_microsecond from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(second_microsecond from true)",
+		Expected: []sql.Row{{1000000}},
+	},
+	{
+		Query:    "select extract(minute_microsecond from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(minute_microsecond from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(minute_microsecond from true)",
+		Expected: []sql.Row{{1000000}},
+	},
+	{
+		Query:    "select extract(minute_second from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(minute_second from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(minute_second from true)",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select extract(hour_microsecond from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(hour_microsecond from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(hour_microsecond from true)",
+		Expected: []sql.Row{{1000000}},
+	},
+	{
+		Query:    "select extract(hour_second from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(hour_second from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(hour_second from true)",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select extract(hour_minute from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(hour_minute from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(hour_minute from true)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(microsecond from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(microsecond from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(microsecond from true)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(second from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(second from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(second from true)",
+		Expected: []sql.Row{{1}},
+	},
+	{
+		Query:    "select extract(minute from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(minute from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(minute from true)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(hour from 0)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		Query:    "select extract(hour from false)",
+		Expected: []sql.Row{{0}},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10087
+		Skip:     true,
+		Query:    "select extract(hour from true)",
+		Expected: []sql.Row{{0}},
 	},
 }

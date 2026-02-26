@@ -191,7 +191,7 @@ func (t *ProcessTable) notifyFuncsForPartition(p sql.Partition) (NotifyFunc, Not
 func GetQueryType(child sql.Node) queryType {
 	// TODO: behavior of CALL is not specified in the docs. Needs investigation
 	var queryType queryType = QueryTypeSelect
-	transform.Inspect(child, func(node sql.Node) bool {
+	transform.InspectWithOpaque(child, func(node sql.Node) bool {
 		if IsNoRowNode(node) {
 			queryType = QueryTypeDdl
 			return false
@@ -246,7 +246,7 @@ func NewTrackedRowIter(
 // any select except a Limit with a SQL_CALC_FOUND_ROWS modifier, which is handled in the Limit node itself.
 func shouldSetFoundRows(node sql.Node) bool {
 	result := true
-	transform.Inspect(node, func(n sql.Node) bool {
+	transform.InspectWithOpaque(node, func(n sql.Node) bool {
 		switch nn := n.(type) {
 		case *Limit:
 			if nn.CalcFoundRows {
@@ -286,7 +286,7 @@ func (i *TrackedRowIter) done() {
 }
 
 func disposeNode(n sql.Node) {
-	transform.Inspect(n, func(node sql.Node) bool {
+	transform.InspectWithOpaque(n, func(node sql.Node) bool {
 		sql.Dispose(node)
 		return true
 	})
@@ -317,6 +317,25 @@ func (i *TrackedRowIter) Next(ctx *sql.Context) (sql.Row, error) {
 	return row, nil
 }
 
+// NextValueRow implements the sql.ValueRowIter interface.
+func (i *TrackedRowIter) NextValueRow(ctx *sql.Context) (sql.ValueRow, error) {
+	row, err := i.iter.(sql.ValueRowIter).NextValueRow(ctx)
+	if err != nil {
+		return nil, err
+	}
+	i.numRows++
+	if i.onNext != nil {
+		i.onNext()
+	}
+	return row, nil
+}
+
+// IsValueRowIter implements the sql.ValueRowIter interface.
+func (i *TrackedRowIter) IsValueRowIter(ctx *sql.Context) bool {
+	iter, ok := i.iter.(sql.ValueRowIter)
+	return ok && iter.IsValueRowIter(ctx)
+}
+
 func (i *TrackedRowIter) Close(ctx *sql.Context) error {
 	err := i.iter.Close(ctx)
 
@@ -335,11 +354,12 @@ func (i *TrackedRowIter) GetIter() sql.RowIter {
 }
 
 func (i *TrackedRowIter) updateSessionVars(ctx *sql.Context) {
+	// TODO: possible to just remove switch entirely?
 	switch i.QueryType {
 	case QueryTypeSelect:
-		ctx.SetLastQueryInfoInt(sql.RowCount, -1)
+		ctx.GetLastQueryInfo().RowCount.Store(-1)
 	case QueryTypeDdl:
-		ctx.SetLastQueryInfoInt(sql.RowCount, 0)
+		ctx.GetLastQueryInfo().RowCount.Store(0)
 	case QueryTypeUpdate:
 		// This is handled by RowUpdateAccumulator
 	default:
@@ -347,7 +367,7 @@ func (i *TrackedRowIter) updateSessionVars(ctx *sql.Context) {
 	}
 
 	if i.ShouldSetFoundRows {
-		ctx.SetLastQueryInfoInt(sql.FoundRows, i.numRows)
+		ctx.GetLastQueryInfo().FoundRows.Store(i.numRows)
 	}
 }
 

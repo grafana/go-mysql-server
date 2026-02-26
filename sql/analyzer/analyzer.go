@@ -36,6 +36,7 @@ import (
 
 const debugAnalyzerKey = "DEBUG_ANALYZER"
 const verboseAnalyzerKey = "VERBOSE_ANALYZER"
+const traceAnalyzerKey = "TRACE_ANALYZER"
 
 const maxAnalysisIterations = 8
 
@@ -75,6 +76,7 @@ type Builder struct {
 	validationRules     []Rule
 	afterAllRules       []Rule
 	debug               bool
+	overrides           sql.EngineOverrides
 }
 
 // NewBuilder creates a new Builder from a specific catalog.
@@ -125,6 +127,12 @@ func (ab *Builder) AddPreValidationRule(id RuleId, fn RuleFunc) *Builder {
 func (ab *Builder) AddPostValidationRule(id RuleId, fn RuleFunc) *Builder {
 	ab.postValidationRules = append(ab.postValidationRules, Rule{Id: id, Apply: fn})
 
+	return ab
+}
+
+// AddOverrides adds the given overrides to the builder.
+func (ab *Builder) AddOverrides(overrides sql.EngineOverrides) *Builder {
+	ab.overrides = overrides
 	return ab
 }
 
@@ -215,6 +223,7 @@ func (s simpleLogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 func (ab *Builder) Build() *Analyzer {
 	_, debug := os.LookupEnv(debugAnalyzerKey)
 	_, verbose := os.LookupEnv(verboseAnalyzerKey)
+	_, trace := os.LookupEnv(traceAnalyzerKey)
 	var batches = []*Batch{
 		{
 			Desc:       "pre-analyzer",
@@ -262,17 +271,18 @@ func (ab *Builder) Build() *Analyzer {
 			Rules:      ab.afterAllRules,
 		},
 	}
-
 	return &Analyzer{
 		Debug:           debug || ab.debug,
 		Verbose:         verbose,
+		Trace:           trace,
 		contextStack:    make([]string, 0),
 		Batches:         batches,
-		Catalog:         NewCatalog(ab.provider),
+		Catalog:         NewCatalog(ab.provider, ab.overrides),
+		Overrides:       ab.overrides,
 		Coster:          memo.NewDefaultCoster(),
-		ExecBuilder:     rowexec.DefaultBuilder,
-		Parser:          sql.GlobalParser,
-		SchemaFormatter: sql.GlobalSchemaFormatter,
+		ExecBuilder:     rowexec.NewBuilder(nil, ab.overrides),
+		Parser:          sql.GetParser(ab.overrides),
+		SchemaFormatter: sql.GetSchemaFormatter(ab.overrides),
 	}
 }
 
@@ -284,19 +294,23 @@ type Analyzer struct {
 	// Parser is the parser used to parse SQL statements.
 	Parser sql.Parser
 	// ExecBuilder converts a sql.Node tree into an executable iterator.
-	ExecBuilder sql.NodeExecBuilder
+	ExecBuilder *rowexec.BaseBuilder
 	// Runner represents the engine, which is represented as a separate interface to work around circular dependencies
 	Runner sql.StatementRunner
 	// SchemaFormatter is used to format the schema of a node to a string.
 	SchemaFormatter sql.SchemaFormatter
 	// Catalog of databases and registered functions.
 	Catalog *Catalog
+	// Overrides contains the overrides for the engine.
+	Overrides sql.EngineOverrides
 	// A stack of debugger context. See PushDebugContext, PopDebugContext
 	contextStack []string
 	// Batches of Rules to apply.
 	Batches []*Batch
 	// Whether to log various debugging messages
 	Debug bool
+	// Whether to output detailed trace logging for join planning
+	Trace bool
 	// Whether to output the query plan at each step of the analyzer
 	Verbose bool
 }
@@ -304,12 +318,6 @@ type Analyzer struct {
 // NewDefault creates a default Analyzer instance with all default Rules and configuration.
 // To add custom rules, the easiest way is use the Builder.
 func NewDefault(provider sql.DatabaseProvider) *Analyzer {
-	return NewBuilder(provider).Build()
-}
-
-// NewDefaultWithVersion creates a default Analyzer instance either
-// experimental or
-func NewDefaultWithVersion(provider sql.DatabaseProvider) *Analyzer {
 	return NewBuilder(provider).Build()
 }
 
@@ -462,12 +470,16 @@ func NewFinalizeUnionSel(sel RuleSelector) RuleSelector {
 	}
 }
 
-func newInsertSourceSelector(sel RuleSelector) RuleSelector {
+func newInsertSourceSelector(sel RuleSelector, inTrigger bool) RuleSelector {
 	return func(id RuleId) bool {
 		switch id {
 		case unnestInSubqueriesId,
 			pushdownSubqueryAliasFiltersId:
 			return false
+		case eraseProjectionId:
+			if inTrigger {
+				return false
+			}
 		}
 		return sel(id)
 	}

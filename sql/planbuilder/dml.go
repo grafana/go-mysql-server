@@ -447,6 +447,14 @@ func (b *Builder) buildDelete(inScope *scope, d *ast.Delete) (outScope *scope) {
 	b.qFlags.Set(sql.QFlagDelete)
 
 	outScope = b.buildFrom(inScope, d.TableExprs)
+
+	// Capture the table node for simple DELETEs before buildWhere wraps it
+	var targets []sql.Node
+	var hasExplicitTargets bool
+	if len(d.Targets) == 0 {
+		targets = []sql.Node{outScope.node}
+	}
+
 	b.buildWhere(outScope, d.Where)
 	orderByScope := b.analyzeOrderBy(outScope, outScope, d.OrderBy)
 	b.buildOrderBy(outScope, orderByScope)
@@ -459,8 +467,8 @@ func (b *Builder) buildDelete(inScope *scope, d *ast.Delete) (outScope *scope) {
 		outScope.node = plan.NewLimit(limit, outScope.node)
 	}
 
-	var targets []sql.Node
 	if len(d.Targets) > 0 {
+		hasExplicitTargets = true
 		targets = make([]sql.Node, len(d.Targets))
 		for i, tableName := range d.Targets {
 			tabName := tableName.Name.String()
@@ -488,7 +496,7 @@ func (b *Builder) buildDelete(inScope *scope, d *ast.Delete) (outScope *scope) {
 		}
 	}
 
-	del := plan.NewDeleteFrom(outScope.node, targets)
+	del := plan.NewDeleteFrom(outScope.node, targets, hasExplicitTargets)
 	del.RefsSingleRel = !outScope.refsSubquery
 	del.IsProcNested = b.ProcCtx().DbName != ""
 	outScope.node = del
@@ -568,7 +576,7 @@ func (b *Builder) buildUpdate(inScope *scope, u *ast.Update) (outScope *scope) {
 			checks = append(checks, b.loadChecksFromTable(tableScope, rt.Table)...)
 		}
 	} else {
-		transform.Inspect(update, func(n sql.Node) bool {
+		transform.InspectWithOpaque(update, func(n sql.Node) bool {
 			// todo maybe this should be later stage
 			if rt, ok := n.(*plan.ResolvedTable); ok {
 				checks = append(checks, b.loadChecksFromTable(outScope, rt.Table)...)
@@ -588,7 +596,7 @@ func (b *Builder) buildUpdate(inScope *scope, u *ast.Update) (outScope *scope) {
 // hasJoinNode returns true if |node| or any child is a JoinNode.
 func hasJoinNode(node sql.Node) bool {
 	updateJoinFound := false
-	transform.Inspect(node, func(n sql.Node) bool {
+	transform.InspectWithOpaque(node, func(n sql.Node) bool {
 		if _, ok := n.(*plan.JoinNode); ok {
 			updateJoinFound = true
 		}
@@ -599,7 +607,7 @@ func hasJoinNode(node sql.Node) bool {
 
 func getResolvedTablesToUpdate(_ *sql.Context, node sql.Node, ij sql.Node) (resolvedTables []*plan.ResolvedTable, err error) {
 	namesOfTablesToBeUpdated := plan.GetTablesToBeUpdated(node)
-	resolvedTablesMap := getTablesByName(ij)
+	resolvedTablesMap := getResolvedTablesByName(ij)
 
 	for tableToBeUpdated, _ := range namesOfTablesToBeUpdated {
 		resolvedTable, ok := resolvedTablesMap[strings.ToLower(tableToBeUpdated)]
@@ -614,10 +622,10 @@ func getResolvedTablesToUpdate(_ *sql.Context, node sql.Node, ij sql.Node) (reso
 }
 
 // getTablesByName takes a node and returns all found resolved tables in a map.
-func getTablesByName(node sql.Node) map[string]*plan.ResolvedTable {
+func getResolvedTablesByName(node sql.Node) map[string]*plan.ResolvedTable {
 	ret := make(map[string]*plan.ResolvedTable)
 
-	transform.Inspect(node, func(node sql.Node) bool {
+	transform.InspectWithOpaque(node, func(node sql.Node) bool {
 		switch n := node.(type) {
 		case *plan.ResolvedTable:
 			ret[strings.ToLower(n.Table.Name())] = n
@@ -642,8 +650,8 @@ func getTablesByName(node sql.Node) map[string]*plan.ResolvedTable {
 // Finds first TableNode node that is a descendant of the node given
 func getResolvedTable(node sql.Node) *plan.ResolvedTable {
 	var table *plan.ResolvedTable
-	transform.Inspect(node, func(node sql.Node) bool {
-		// plan.Inspect will get called on all children of a node even if one of the children's calls returns false. We
+	transform.InspectWithOpaque(node, func(node sql.Node) bool {
+		// plan.InspectWithOpaque will get called on all children of a node even if one of the children's calls returns false. We
 		// only want the first TableNode match.
 		if table != nil {
 			return false

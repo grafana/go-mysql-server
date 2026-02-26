@@ -600,16 +600,37 @@ var DefaultJoinOpTests = []joinOpTest{
 		name: "left join tests",
 		setup: [][]string{
 			{
-				"create table xy (x int primary key, y int)",
-				"create table uv (u int primary key, v int, key(v))",
-				"insert into xy values (0,0),(2,2),(3,3),(4,4),(5,5),(7,7),(8,8),(10,10);",
-				"insert into uv values (0,0),(1,1),(3,3),(5,5),(6,5),(7,7),(9,9),(10,10);",
+				"create table xy (x int primary key, y int);",
+				"create table uv (u int primary key, v int, key(v));",
+				"create table st (s int primary key, t int, key(t));",
+				"insert into xy values (0,1),(2,3),(3,4),(4,5),(5,6),(7,8),(8,9),(10,11);",
+				"insert into uv values (1,0),(2,1),(3,3),(4,5),(5,5),(6,7),(7,9),(8,10);",
+				"insert into st values (10, 9), (8, 7), (6, 6), (5, 7), (3, 2), (1, 0);",
 			},
 		},
 		tests: []JoinOpTests{
 			{
-				Query:    "select x from xy left join uv on x = v",
+				Query:    "select x from xy left join uv on x = v;",
 				Expected: []sql.Row{{0}, {2}, {3}, {4}, {5}, {5}, {7}, {8}, {10}},
+			},
+			{
+				// https://github.com/dolthub/dolt/issues/10451
+				Query:    "select u from xy left join uv on u = -2;",
+				Expected: []sql.Row{{nil}, {nil}, {nil}, {nil}, {nil}, {nil}, {nil}, {nil}},
+			},
+			{
+				Query: "select x, v, s from xy left join uv on x = v left join st on u=t;",
+				Expected: []sql.Row{
+					{0, 0, nil},
+					{2, nil, nil},
+					{3, 3, nil},
+					{4, nil, nil},
+					{5, 5, nil},
+					{5, 5, nil},
+					{7, 7, 6},
+					{8, nil, nil},
+					{10, 10, nil},
+				},
 			},
 		},
 	},
@@ -2254,6 +2275,115 @@ WHERE
 			{
 				Query:    "select * from t1 right outer join t2 on false where t1.c0 is not null",
 				Expected: []sql.Row{},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10186
+		name: "natural right join with varchar primary key",
+		setup: [][]string{
+			{
+				"create table t0(c0 varchar(500), c1 boolean, primary key(c0))",
+				"create table t1(c0 boolean, c1 boolean)",
+				"insert into t1(c0, c1) values (false, true)",
+				"insert into t0(c0, c1) values ('i', true)",
+			},
+		},
+		tests: []JoinOpTests{
+			{
+				Query:    `SELECT t0.c1, t0.c0 from t0 natural right join t1`,
+				Expected: []sql.Row{{1, "i"}},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10233
+		name: "inner join with out of range key",
+		setup: [][]string{
+			{
+				"create table t0(c0 boolean, c1 int)",
+				"create index t0i0 on t0(c0, c1)",
+				"create table t1(c0 int)",
+				"insert into t0(c0, c1) values (-128, 1)",
+				"insert into t1(c0) values (1),(2)",
+			},
+		},
+		tests: []JoinOpTests{
+			{
+				Query:    "select * from t1 inner join t0 on t0.c0<=>(-87840)",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from t0 inner join t1 on t0.c0<=>(-87840)",
+				Expected: []sql.Row{},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10311
+		name: "join on different enum types",
+		setup: [][]string{
+			{
+				"create table animals(e enum('rat','ox','tiger','dog') primary key);",
+				"create table pets(e enum('cat','dog','fish','rat'));",
+				"insert into animals values('rat'), ('dog');",
+				"insert into pets values ('cat'), ('dog'), ('rat');",
+			},
+		},
+		tests: []JoinOpTests{
+			{
+				// hash join doesn't work here https://github.com/dolthub/dolt/issues/10336
+				Skip:     true,
+				Query:    "select * from animals join pets on animals.e=pets.e order by animals.e;",
+				Expected: []sql.Row{{"rat", "rat"}, {"dog", "dog"}},
+			},
+		},
+	},
+	{
+		name: "join on string and number columns",
+		setup: [][]string{
+			{
+				"create table t0(c0 varchar(500) primary key, c1 int)",
+				"create table t1(c0 int primary key, c1 varchar(500))",
+				"insert into t0(c0) values (5), (33), (223), ('123a')",
+				"insert into t1(c0) values (5), (33), (223), (123)",
+				"insert into t1(c0) values (-1)",
+				"insert into t0(c0, c1) values (false, -2)",
+			},
+		},
+		tests: []JoinOpTests{
+			{
+				Query:    "select t0.c0, t1.c0 from t0 join t1 on t0.c0 = t1.c0 order by t1.c0;",
+				Expected: []sql.Row{{"5", 5}, {"33", 33}, {"123a", 123}, {"223", 223}},
+			},
+			{
+				// https://github.com/dolthub/dolt/issues/10435
+				Query:    "select * from t1 inner join t0 on (t1.c0 between t0.c1 and t0.c0)",
+				Expected: []sql.Row{{-1, nil, "0", -2}},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10527
+		name: "join on table with dots in name",
+		setup: [][]string{
+			{
+				"create table t1(id int, name varchar(100), location varchar(100));",
+				"create index id_name_location on t1 (id, name, location);",
+				"create index name_id_location on t1(name, id, location);",
+				"create index location_id_name on t1 (location, id, name);",
+				"insert into t1 values (1, 'name1', 'loc1');",
+				"create table `t2.with.dot`(id int, name varchar(100), country varchar(100));",
+				"create index id_name_country on `t2.with.dot`(id, name, country);",
+				"create index name_id_country on `t2.with.dot`(name, id, country);",
+				"create index country_id_name on `t2.with.dot`(country, id, name);",
+				"insert into `t2.with.dot` values (1, 'name1', 'CA');",
+			},
+		},
+		tests: []JoinOpTests{
+			{
+				Query:    "SELECT t1.id, t1.name, t1.location, `t2.with.dot`.country FROM t1 JOIN `t2.with.dot` ON t1.id = `t2.with.dot`.id WHERE t1.id = 1;",
+				Expected: []sql.Row{{1, "name1", "loc1", "CA"}},
 			},
 		},
 	},

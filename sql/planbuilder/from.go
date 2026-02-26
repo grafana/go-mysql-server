@@ -75,7 +75,8 @@ func (b *Builder) isUsingJoin(te *ast.JoinTableExpr) bool {
 	return te.Condition.Using != nil ||
 		strings.EqualFold(te.Join, ast.NaturalJoinStr) ||
 		strings.EqualFold(te.Join, ast.NaturalLeftJoinStr) ||
-		strings.EqualFold(te.Join, ast.NaturalRightJoinStr)
+		strings.EqualFold(te.Join, ast.NaturalRightJoinStr) ||
+		strings.EqualFold(te.Join, ast.NaturalFullJoinStr)
 }
 
 func (b *Builder) canConvertToCrossJoin(te *ast.JoinTableExpr) bool {
@@ -114,7 +115,7 @@ func (b *Builder) buildJoin(inScope *scope, te *ast.JoinTableExpr) (outScope *sc
 	if b.canConvertToCrossJoin(te) {
 		if rast, ok := te.RightExpr.(*ast.AliasedTableExpr); ok && rast.Lateral {
 			var err error
-			outScope.node, err = b.f.buildJoin(leftScope.node, rightScope.node, plan.JoinTypeLateralCross, expression.NewLiteral(true, types.Boolean))
+			outScope.node, err = b.f.buildJoin(leftScope.node, rightScope.node, plan.JoinTypeLateralCross, nil)
 			if err != nil {
 				b.handleErr(err)
 			}
@@ -264,6 +265,7 @@ func (b *Builder) buildUsingJoin(inScope, leftScope, rightScope *scope, te *ast.
 	}
 
 	switch strings.ToLower(te.Join) {
+	// TODO handle ast.FullOuterJoinStr, ast.NaturalFullJoinStr case https://github.com/dolthub/dolt/issues/10295
 	case ast.JoinStr, ast.NaturalJoinStr:
 		outScope.node = plan.NewInnerJoin(leftScope.node, rightScope.node, filter)
 	case ast.LeftJoinStr, ast.NaturalLeftJoinStr:
@@ -689,7 +691,7 @@ func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, as
 		asOfLit = asof
 	}
 
-	if view := b.resolveView(name, database, asOfLit); view != nil {
+	if view := b.resolveView(name, database, asOfLit, outScope); view != nil {
 		// TODO: Schema name
 		return resolvedViewScope(outScope, view, db, name)
 	}
@@ -799,27 +801,14 @@ func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, as
 func resolvedViewScope(outScope *scope, view sql.Node, db string, name string) (*scope, bool) {
 	outScope.node = view
 	tabId := outScope.addTable(strings.ToLower(view.Schema()[0].Name))
-	var cols sql.ColSet
-	for _, c := range view.Schema() {
-		id := outScope.newColumn(scopeColumn{
-			db:          db,
-			table:       name,
-			col:         strings.ToLower(c.Name),
-			originalCol: c.Name,
-			typ:         c.Type,
-			nullable:    c.Nullable,
-		})
-		cols.Add(sql.ColumnId(id))
-	}
 	if tin, ok := view.(plan.TableIdNode); ok {
 		// TODO should *sql.View implement TableIdNode?
-		outScope.node = tin.WithId(tabId).WithColumns(cols)
+		outScope.node = tin.WithId(tabId)
 	}
-
 	return outScope, true
 }
 
-func (b *Builder) resolveView(name string, database sql.Database, asOf interface{}) sql.Node {
+func (b *Builder) resolveView(name string, database sql.Database, asOf interface{}, outScope *scope) sql.Node {
 	var view *sql.View
 
 	if vdb, vok := database.(sql.ViewDatabase); vok {
@@ -845,7 +834,10 @@ func (b *Builder) resolveView(name string, database sql.Database, asOf interface
 			if err != nil {
 				b.handleErr(err)
 			}
-			node, _, err := b.bindOnlyWithDatabase(database, stmt, viewDef.CreateViewStatement)
+			// TODO: Once view definers are persisted, load the real definer client
+			restoreInvoker := b.mockDefiner(sql.PrivilegeType_CreateView)
+			defer restoreInvoker()
+			viewScope, _, err := b.bindOnlyWithDatabase(database, stmt, viewDef.CreateViewStatement)
 			if err != nil {
 				// TODO: Need to account for non-existing functions or
 				//  users without appropriate privilege to the referenced table/column/function.
@@ -855,9 +847,10 @@ func (b *Builder) resolveView(name string, database sql.Database, asOf interface
 				}
 				b.handleErr(err)
 			}
-			create, ok := node.(*plan.CreateView)
+			outScope.appendColumnsFromScope(viewScope)
+			create, ok := viewScope.node.(*plan.CreateView)
 			if !ok {
-				err = fmt.Errorf("expected create view statement, found: %T", node)
+				err = fmt.Errorf("expected create view statement, found: %T", viewScope.node)
 				b.handleErr(err)
 			}
 			switch n := create.Child.(type) {
@@ -898,11 +891,12 @@ func (b *Builder) resolveView(name string, database sql.Database, asOf interface
 
 // bindOnlyWithDatabase sets the current database to given database before binding and sets it back to the original
 // database after binding. This function is used for binding a subquery using the same database as the original query.
-func (b *Builder) bindOnlyWithDatabase(db sql.Database, stmt ast.Statement, s string) (sql.Node, *sql.QueryFlags, error) {
+func (b *Builder) bindOnlyWithDatabase(db sql.Database, stmt ast.Statement, s string) (*scope, *sql.QueryFlags, error) {
 	curDb := b.currentDb()
 	defer func() {
 		b.currentDatabase = curDb
 	}()
 	b.currentDatabase = db
-	return b.BindOnly(stmt, s, nil)
+	outScope, err := b.bindOnly(stmt, s, nil)
+	return outScope, b.qFlags, err
 }

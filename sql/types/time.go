@@ -28,6 +28,7 @@ import (
 	"gopkg.in/src-d/go-errors.v1"
 
 	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/dolthub/go-mysql-server/sql/values"
 )
 
 var (
@@ -97,6 +98,11 @@ func (t TimespanType_) Compare(s context.Context, a interface{}, b interface{}) 
 	}
 
 	return as.Compare(bs), nil
+}
+
+// CompareValue implements the ValueType interface
+func (t TimespanType_) CompareValue(ctx *sql.Context, a, b sql.Value) (int, error) {
+	panic("TODO: implement CompareValue for TimespanType")
 }
 
 func (t TimespanType_) Convert(c context.Context, v interface{}) (interface{}, sql.ConvertInRange, error) {
@@ -258,13 +264,25 @@ func (t TimespanType_) SQL(_ *sql.Context, dest []byte, v interface{}) (sqltypes
 	if v == nil {
 		return sqltypes.NULL, nil
 	}
+
 	ti, err := t.ConvertToTimespan(v)
 	if err != nil {
 		return sqltypes.Value{}, err
 	}
 
-	val := ti.Bytes()
-	return sqltypes.MakeTrusted(sqltypes.Time, val), nil
+	dest = ti.AppendBytes(dest)
+	return sqltypes.MakeTrusted(sqltypes.Time, dest), nil
+}
+
+// SQLValue implements ValueType interface.
+func (t TimespanType_) SQLValue(ctx *sql.Context, v sql.Value, dest []byte) (sqltypes.Value, error) {
+	if v.IsNull() {
+		return sqltypes.NULL, nil
+	}
+
+	x := values.ReadInt64(v.Val)
+	dest = Timespan(x).AppendBytes(dest)
+	return sqltypes.MakeTrusted(sqltypes.Time, dest), nil
 }
 
 // String implements Type interface.
@@ -485,7 +503,46 @@ func (t Timespan) Bytes() []byte {
 	return ret[:i]
 }
 
-// appendDigit format prints 0-entended integer into buffer
+func (t Timespan) AppendBytes(dest []byte) []byte {
+	isNeg, h, m, s, ms := t.timespanToUnits()
+	if isNeg {
+		dest = append(dest, '-')
+	}
+	dest = appendTimeFormat(dest, int64(h), int64(m), int64(s), int64(ms))
+	return dest
+}
+
+func appendTimeFormat(dest []byte, h, m, s, ms int64) []byte {
+	if h < 10 {
+		dest = append(dest, '0')
+	}
+	dest = strconv.AppendInt(dest, h, 10)
+	dest = append(dest, ':')
+
+	if m < 10 {
+		dest = append(dest, '0')
+	}
+	dest = strconv.AppendInt(dest, m, 10)
+	dest = append(dest, ':')
+
+	if s < 10 {
+		dest = append(dest, '0')
+	}
+	dest = strconv.AppendInt(dest, s, 10)
+
+	if ms > 0 {
+		dest = append(dest, '.')
+		cmp := int64(100000)
+		for cmp > 0 && ms < cmp {
+			dest = append(dest, '0')
+			cmp /= 10
+		}
+		dest = strconv.AppendInt(dest, ms, 10)
+	}
+	return dest
+}
+
+// appendDigit format prints 0-extended integer into buffer
 func appendDigit(v int64, extend int, buf []byte, i int) int {
 	cmp := int64(1)
 	for _ = range extend - 1 {

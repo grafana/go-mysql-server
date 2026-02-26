@@ -154,7 +154,7 @@ func (i *triggerBlockIter) Next(ctx *sql.Context) (sql.Row, error) {
 // of the given node.
 func shouldUseTriggerStatementForReturnRow(stmt sql.Node) bool {
 	hasSetField := false
-	transform.Inspect(stmt, func(n sql.Node) bool {
+	transform.InspectWithOpaque(stmt, func(n sql.Node) bool {
 		switch logic := n.(type) {
 		case *plan.Set:
 			for _, expr := range logic.Exprs {
@@ -331,7 +331,7 @@ func shouldUseLogicResult(logic sql.Node, row sql.Row) (bool, sql.Row) {
 		return hasSetField, row[len(row)/2:]
 	case *plan.TriggerBeginEndBlock:
 		hasSetField := false
-		transform.Inspect(logic, func(n sql.Node) bool {
+		transform.InspectWithOpaque(logic, func(n sql.Node) bool {
 			set, ok := n.(*plan.Set)
 			if !ok {
 				return true
@@ -746,14 +746,15 @@ func (a *accumulatorIter) Next(ctx *sql.Context) (r sql.Row, err error) {
 		}
 		if err == io.EOF {
 			// TODO: The information flow here is pretty gnarly. We
-			// set some session variables based on the result, and
-			// we actually use a session variable to set
-			// InsertID. This should be improved.
+			//  set some session variables based on the result, and
+			//  we actually use a session variable to set
+			//  InsertID. This should be improved.
 
 			// UPDATE statements also set FoundRows to the number of rows that
 			// matched the WHERE clause, same as a SELECT.
+			lastQueryInfo := ctx.GetLastQueryInfo()
 			if ma, ok := a.updateRowHandler.(matchingAccumulator); ok {
-				ctx.SetLastQueryInfoInt(sql.FoundRows, ma.RowsMatched())
+				lastQueryInfo.FoundRows.Store(ma.RowsMatched())
 			}
 
 			res := a.updateRowHandler.okResult() // TODO: Should add warnings here
@@ -763,14 +764,13 @@ func (a *accumulatorIter) Next(ctx *sql.Context) (r sql.Row, err error) {
 			// to be fixed. See comment in buildRowUpdateAccumulator in rowexec/dml.go
 			switch rowHandler := a.updateRowHandler.(type) {
 			case *onDuplicateUpdateHandler, *replaceRowHandler:
-				lastInsertId := ctx.Session.GetLastQueryInfoInt(sql.LastInsertId)
+				lastInsertId := lastQueryInfo.LastInsertId.Load()
 				res.InsertID = uint64(lastInsertId)
 			case *insertRowHandler:
 				res.InsertID = rowHandler.lastInsertId
 			}
-
 			// By definition, ROW_COUNT() is equal to RowsAffected.
-			ctx.SetLastQueryInfoInt(sql.RowCount, int64(res.RowsAffected))
+			lastQueryInfo.RowCount.Store(int64(res.RowsAffected))
 
 			return sql.NewRow(res), nil
 		} else if isIg {

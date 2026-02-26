@@ -63,6 +63,11 @@ func (d *DateDiff) String() string {
 // Type implements the sql.Expression interface.
 func (d *DateDiff) Type() sql.Type { return types.Int64 }
 
+// IsNullable implements the Expression interface
+func (d *DateDiff) IsNullable() bool {
+	return true
+}
+
 // CollationCoercibility implements the interface sql.CollationCoercible.
 func (*DateDiff) CollationCoercibility(ctx *sql.Context) (collation sql.CollationID, coercibility byte) {
 	return sql.Collation_binary, 5
@@ -82,37 +87,47 @@ func (d *DateDiff) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 		return nil, nil
 	}
 
-	expr1, err := d.LeftChild.Eval(ctx, row)
+	val1, err := d.LeftChild.Eval(ctx, row)
 	if err != nil {
 		return nil, err
 	}
-	if expr1 == nil {
+	if val1 == nil {
 		return nil, nil
 	}
 
-	expr1, _, err = types.DatetimeMaxPrecision.Convert(ctx, expr1)
+	expr1, _, err := types.DatetimeMaxPrecision.Convert(ctx, val1)
 	if err != nil {
-		return nil, err
+		ctx.Warn(1292, "Incorrect datetime value: '%s'", val1)
+		return nil, nil
 	}
 
 	expr1str := expr1.(time.Time).String()[:10]
 	expr1, _, _ = types.DatetimeMaxPrecision.Convert(ctx, expr1str)
-
-	expr2, err := d.RightChild.Eval(ctx, row)
-	if err != nil {
-		return nil, err
-	}
-	if expr2 == nil {
+	if expr1 == nil {
+		ctx.Warn(1292, "Incorrect datetime value: '%s'", val1)
 		return nil, nil
 	}
 
-	expr2, _, err = types.DatetimeMaxPrecision.Convert(ctx, expr2)
+	val2, err := d.RightChild.Eval(ctx, row)
 	if err != nil {
 		return nil, err
+	}
+	if val2 == nil {
+		return nil, nil
+	}
+
+	expr2, _, err := types.DatetimeMaxPrecision.Convert(ctx, val2)
+	if err != nil {
+		ctx.Warn(1292, "Incorrect datetime value: '%s'", val2)
+		return nil, nil
 	}
 
 	expr2str := expr2.(time.Time).String()[:10]
 	expr2, _, _ = types.DatetimeMaxPrecision.Convert(ctx, expr2str)
+	if expr2 == nil {
+		ctx.Warn(1292, "Incorrect datetime value: '%s'", val2)
+		return nil, nil
+	}
 
 	date1 := expr1.(time.Time)
 	date2 := expr2.(time.Time)
@@ -237,9 +252,14 @@ func (d *DateAdd) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 		ctx.Warn(1292, "%s", err.Error())
 		return nil, nil
 	}
+	datetime, ok := dateVal.(time.Time)
+	if !ok || datetime.Equal(types.ZeroTime) {
+		ctx.Warn(1292, "Incorrect datetime value: '%s'", date)
+		return nil, nil
+	}
 
 	// return appropriate type
-	res := types.ValidateTime(delta.Add(dateVal.(time.Time)))
+	res := types.ValidateTime(delta.Add(datetime))
 	if res == nil {
 		return nil, nil
 	}
@@ -385,9 +405,14 @@ func (d *DateSub) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 		ctx.Warn(1292, "%s", err.Error())
 		return nil, nil
 	}
+	datetime, ok := dateVal.(time.Time)
+	if !ok || datetime.Equal(types.ZeroTime) {
+		ctx.Warn(1292, "Incorrect datetime value: '%s'", date)
+		return nil, nil
+	}
 
 	// return appropriate type
-	res := types.ValidateTime(delta.Sub(dateVal.(time.Time)))
+	res := types.ValidateTime(delta.Sub(datetime))
 	if res == nil {
 		return nil, nil
 	}
@@ -580,7 +605,7 @@ func (t *TimestampDiff) Resolved() bool {
 
 // IsNullable implements the sql.Expression interface.
 func (t *TimestampDiff) IsNullable() bool {
-	return t.unit.IsNullable() && t.expr1.IsNullable() && t.expr2.IsNullable()
+	return true
 }
 
 // Type implements the sql.Expression interface.
@@ -644,75 +669,70 @@ func (t *TimestampDiff) Eval(ctx *sql.Context, row sql.Row) (interface{}, error)
 
 	unit = strings.TrimPrefix(strings.ToLower(unit.(string)), "sql_tsi_")
 
-	date1 := expr1.(time.Time)
-	date2 := expr2.(time.Time)
-
-	diff := date2.Sub(date1)
+	time1 := expr1.(time.Time)
+	time2 := expr2.(time.Time)
 
 	var res int64
 	switch unit {
 	case "microsecond":
-		res = diff.Microseconds()
+		res = microsecondsDiff(time1, time2)
 	case "second":
-		res = int64(diff.Seconds())
+		res = microsecondsDiff(time1, time2) / sql.MicrosecondsPerSecond
 	case "minute":
-		res = int64(diff.Minutes())
+		res = microsecondsDiff(time1, time2) / sql.MicrosecondsPerMinute
 	case "hour":
-		res = int64(diff.Hours())
+		res = microsecondsDiff(time1, time2) / sql.MicrosecondsPerHour
 	case "day":
-		res = int64(diff.Hours() / 24)
+		res = microsecondsDiff(time1, time2) / sql.MicrosecondsPerDay
 	case "week":
-		res = int64(diff.Hours() / (24 * 7))
+		res = microsecondsDiff(time1, time2) / sql.MicrosecondsPerWeek
 	case "month":
-		res = int64(diff.Hours() / (24 * 30))
-		if res > 0 {
-			if date2.Day()-date1.Day() < 0 {
-				res -= 1
-			} else if date2.Hour()-date1.Hour() < 0 {
-				res -= 1
-			} else if date2.Minute()-date1.Minute() < 0 {
-				res -= 1
-			} else if date2.Second()-date1.Second() < 0 {
-				res -= 1
-			}
-		}
+		res = monthsDiff(time1, time2)
 	case "quarter":
-		monthRes := int64(diff.Hours() / (24 * 30))
-		if monthRes > 0 {
-			if date2.Day()-date1.Day() < 0 {
-				monthRes -= 1
-			} else if date2.Hour()-date1.Hour() < 0 {
-				monthRes -= 1
-			} else if date2.Minute()-date1.Minute() < 0 {
-				monthRes -= 1
-			} else if date2.Second()-date1.Second() < 0 {
-				monthRes -= 1
-			}
-		}
-		res = monthRes / 3
+		res = monthsDiff(time1, time2) / sql.MonthsPerQuarter
 	case "year":
-		yearRes := int64(diff.Hours() / (24 * 365))
-		if yearRes > 0 {
-			monthRes := int64(diff.Hours() / (24 * 30))
-			if monthRes > 0 {
-				if date2.Day()-date1.Day() < 0 {
-					monthRes -= 1
-				} else if date2.Hour()-date1.Hour() < 0 {
-					monthRes -= 1
-				} else if date2.Minute()-date1.Minute() < 0 {
-					monthRes -= 1
-				} else if date2.Second()-date1.Second() < 0 {
-					monthRes -= 1
-				}
-			}
-			res = monthRes / 12
-		} else {
-			res = yearRes
-		}
-
+		res = monthsDiff(time1, time2) / sql.MonthsPerYear
 	default:
 		return nil, errors.NewKind("invalid interval unit: %s").New(unit)
 	}
 
 	return res, nil
+}
+
+// monthsDiff calculates the difference between two time.Times in number of full months based on their Date and Clock
+// values.
+func monthsDiff(time1, time2 time.Time) int64 {
+	sign := 1
+	before := time1
+	after := time2
+	if before.After(after) {
+		sign = -1
+		before = time2
+		after = time1
+	}
+
+	beforeYear, beforeMonth, beforeDay := before.Date()
+	afterYear, afterMonth, afterDay := after.Date()
+	yearDiff := afterYear - beforeYear
+	monthDiff := int64(afterMonth) - int64(beforeMonth)
+
+	if beforeDay > afterDay {
+		monthDiff -= 1
+	} else if beforeDay == afterDay {
+		beforeHour, beforeMin, beforeSec := before.Clock()
+		afterHour, afterMin, afterSec := after.Clock()
+		secondDiff := int64(afterHour-beforeHour)*sql.SecondsPerHour + int64(afterMin-beforeMin)*sql.SecondsPerMinute +
+			int64(afterSec-beforeSec)
+		if secondDiff < 0 {
+			monthDiff -= 1
+		} else if secondDiff == 0 && before.Nanosecond() > after.Nanosecond() {
+			monthDiff -= 1
+		}
+	}
+
+	return int64(sign) * (int64(yearDiff*sql.MonthsPerYear) + monthDiff)
+}
+
+func microsecondsDiff(time1, time2 time.Time) int64 {
+	return time2.UnixMicro() - time1.UnixMicro()
 }

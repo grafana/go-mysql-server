@@ -100,11 +100,15 @@ func unnestSelectExistsHelper(ctx *sql.Context, scope *plan.Scope, a *Analyzer, 
 // simplifyPartialJoinParents discards nodes that will not affect an existence check.
 func simplifyPartialJoinParents(n sql.Node) (sql.Node, bool) {
 	ret := n
+	// TODO: This should probably be a transform since we could have multiple layers of these types of nodes wrapped
+	//  together.
 	for {
 		switch n := ret.(type) {
 		case *plan.Having:
 			return nil, false
-		case *plan.Project, *plan.GroupBy, *plan.Limit, *plan.Sort, *plan.Distinct, *plan.TopN:
+		case *plan.Project, *plan.GroupBy, *plan.Sort, *plan.Distinct, *plan.TopN, *plan.Limit:
+			// TODO: In most cases, it's necessary to remove *plan.Limit because child Filter nodes will have been
+			//  hoisted out. But what if Limit.Limit evals to 0? https://github.com/dolthub/dolt/issues/10493
 			ret = n.Children()[0]
 		default:
 			return ret, true
@@ -132,7 +136,7 @@ func unnestExistSubqueries(ctx *sql.Context, scope *plan.Scope, a *Analyzer, fil
 		case *expression.Not:
 			if esq, ok := e.Child.(*plan.ExistsSubquery); ok {
 				sq = esq.Query
-				joinType = plan.JoinTypeAnti
+				joinType = plan.JoinTypeAntiIncludeNulls
 			}
 		default:
 		}
@@ -142,6 +146,9 @@ func unnestExistSubqueries(ctx *sql.Context, scope *plan.Scope, a *Analyzer, fil
 		}
 
 		// try to decorrelate
+		// TODO: We're currently not able to decorrelate outer columns because we are pushing outerscope/correlated
+		//  filters below SubqueryAliases. We likely need to rearrange the ordering of our rules.
+		//  https://github.com/dolthub/dolt/issues/10490
 		s, err = decorrelateOuterCols(sq.Query, aliasDisambig, sq.Correlated())
 		if err != nil {
 			return nil, transform.SameTree, err
@@ -160,6 +167,9 @@ func unnestExistSubqueries(ctx *sql.Context, scope *plan.Scope, a *Analyzer, fil
 			}
 		}
 
+		// TODO: This should be done by walking the entire node instead of just checking the top node. What if we have
+		//  a join where one side is a cacheable SQA and the other side is an uncacheable SQA? We should be able to
+		//  detect that.
 		if sqa, ok := s.inner.(*plan.SubqueryAlias); ok {
 			if !sqa.CanCacheResults() {
 				return filter, transform.SameTree, nil
@@ -176,7 +186,7 @@ func unnestExistSubqueries(ctx *sql.Context, scope *plan.Scope, a *Analyzer, fil
 
 		if s.emptyScope {
 			switch joinType {
-			case plan.JoinTypeAnti:
+			case plan.JoinTypeAntiIncludeNulls:
 				// ret will be all rows
 			case plan.JoinTypeSemi:
 				ret = plan.NewEmptyTableWithSchema(ret.Schema())
@@ -187,13 +197,21 @@ func unnestExistSubqueries(ctx *sql.Context, scope *plan.Scope, a *Analyzer, fil
 		}
 
 		if len(s.joinFilters) == 0 {
+			// TODO: this is unsafe to do if query was originally wrapped in a Limit that evaluates to zero
+			//   https://github.com/dolthub/dolt/issues/10493
+			limited := plan.NewLimit(expression.NewLiteral(1, types.Int64), s.inner)
 			switch joinType {
-			case plan.JoinTypeAnti:
-				cond := expression.NewLiteral(true, types.Boolean)
-				ret = plan.NewAntiJoinIncludingNulls(ret, s.inner, cond).WithComment(comment)
+			case plan.JoinTypeAntiIncludeNulls:
+				ret = plan.NewAntiJoinIncludingNulls(ret, limited, nil).WithComment(comment)
 				qFlags.Set(sql.QFlagInnerJoin)
 			case plan.JoinTypeSemi:
-				ret = plan.NewCrossJoin(ret, s.inner).WithComment(comment)
+				if sq.Correlated().Empty() {
+					ret = plan.NewCrossJoin(ret, limited).WithComment(comment)
+				} else {
+					// TODO: when does this actually happen? Should we account for this in an AntiJoin? What about when
+					//  there are join filters?
+					ret = plan.NewLateralCrossJoin(ret, limited).WithComment(comment)
+				}
 				qFlags.Set(sql.QFlagCrossJoin)
 			default:
 				return filter, transform.SameTree, fmt.Errorf("hoistSelectExists failed on unexpected join type")
@@ -208,11 +226,8 @@ func unnestExistSubqueries(ctx *sql.Context, scope *plan.Scope, a *Analyzer, fil
 		}
 
 		switch joinType {
-		case plan.JoinTypeAnti:
-			ret = plan.NewAntiJoinIncludingNulls(ret, s.inner, expression.JoinAnd(outerFilters...)).WithComment(comment)
-			qFlags.Set(sql.QFlagInnerJoin)
-		case plan.JoinTypeSemi:
-			ret = plan.NewSemiJoin(ret, s.inner, expression.JoinAnd(outerFilters...)).WithComment(comment)
+		case plan.JoinTypeAntiIncludeNulls, plan.JoinTypeSemi:
+			ret = plan.NewJoin(ret, s.inner, joinType, expression.JoinAnd(outerFilters...)).WithComment(comment)
 			qFlags.Set(sql.QFlagInnerJoin)
 		default:
 			return filter, transform.SameTree, fmt.Errorf("hoistSelectExists failed on unexpected join type")
@@ -249,14 +264,6 @@ type hoistSubquery struct {
 	joinFilters []sql.Expression
 	emptyScope  bool
 }
-
-type fakeNameable struct {
-	name string
-}
-
-var _ sql.Nameable = (*fakeNameable)(nil)
-
-func (f fakeNameable) Name() string { return f.name }
 
 // decorrelateOuterCols returns an optionally modified subquery and extracted filters referencing an outer scope.
 // If the subquery has aliases that conflict with outside aliases, the internal aliases will be renamed to avoid
@@ -404,10 +411,6 @@ func decorrelateOuterCols(sqChild sql.Node, aliasDisambig *aliasDisambiguator, c
 	}
 	if len(filtersToKeep) > 0 {
 		n = plan.NewFilter(expression.JoinAnd(filtersToKeep...), n)
-	}
-
-	if len(joinFilters) == 0 {
-		n = plan.NewLimit(expression.NewLiteral(1, types.Int64), n)
 	}
 
 	return &hoistSubquery{

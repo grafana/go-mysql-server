@@ -31,6 +31,7 @@ func init() {
 // OnceBeforeDefault contains the rules to be applied just once before the
 // DefaultRules.
 var OnceBeforeDefault = []Rule{
+	{Id: engineOverridesId, Apply: engineOverrides},
 	{Id: applyDefaultSelectLimitId, Apply: applyDefaultSelectLimit},
 	{Id: replaceCountStarId, Apply: replaceCountStar},
 	{Id: validateOffsetAndLimitId, Apply: validateOffsetAndLimit},
@@ -51,7 +52,6 @@ var OnceBeforeDefault = []Rule{
 	{Id: validateDeleteFromId, Apply: validateDeleteFrom},
 	{Id: simplifyFiltersId, Apply: simplifyFilters}, //TODO inline?
 	{Id: pushNotFiltersId, Apply: pushNotFilters},   //TODO inline?
-	{Id: hoistOutOfScopeFiltersId, Apply: hoistOutOfScopeFilters},
 	{Id: validateGroupById, Apply: validateGroupBy},
 }
 
@@ -63,6 +63,7 @@ var AlwaysBeforeDefault []Rule
 
 // DefaultRules to apply when analyzing nodes.
 var DefaultRules = []Rule{
+	{Id: hoistOutOfScopeFiltersId, Apply: hoistOutOfScopeFilters},
 	{Id: validateStarExpressionsId, Apply: validateStarExpressions}, //TODO
 	{Id: replaceSubqueriesId, Apply: replaceSubqueries},
 	{Id: pushdownSubqueryAliasFiltersId, Apply: pushdownSubqueryAliasFilters},

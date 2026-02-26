@@ -123,6 +123,38 @@ type ScriptTestAssertion struct {
 // the tests.
 var ScriptTests = []ScriptTest{
 	{
+		// https://github.com/dolthub/dolt/issues/10113
+		Name: "DELETE with NOT EXISTS subquery",
+		SetUpScript: []string{
+			`CREATE TABLE IF NOT EXISTS student (
+				id BIGINT AUTO_INCREMENT,
+				name VARCHAR(50) NOT NULL,
+				PRIMARY KEY (id)
+			);`,
+			`CREATE TABLE IF NOT EXISTS student_hobby (
+				id BIGINT AUTO_INCREMENT,
+				student_id BIGINT NOT NULL,
+				hobby VARCHAR(50) NOT NULL,
+				PRIMARY KEY (id)
+			);`,
+			"INSERT INTO student (id, name) VALUES (1, 'test1');",
+			"INSERT INTO student (id, name) VALUES (2, 'test2');",
+			"INSERT INTO student_hobby (id, student_id, hobby) VALUES (1, 1, 'test1');",
+			"INSERT INTO student_hobby (id, student_id, hobby) VALUES (2, 2, 'test2');",
+			"INSERT INTO student_hobby (id, student_id, hobby) VALUES (3, 100, 'test3');",
+			"INSERT INTO student_hobby (id, student_id, hobby) VALUES (4, 100, 'test3');",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: "delete from student_hobby where not exists (select 1 from student where student.id = student_hobby.student_id);",
+			},
+			{
+				Query:    "SELECT * FROM student_hobby ORDER BY id;",
+				Expected: []sql.Row{{1, 1, "test1"}, {2, 2, "test2"}},
+			},
+		},
+	},
+	{
 		// https://github.com/dolthub/dolt/issues/9987
 		Name: "GROUP BY nil pointer dereference in Dispose when Next() never called",
 		SetUpScript: []string{
@@ -4845,6 +4877,11 @@ CREATE TABLE tab3 (
 				Expected: []sql.Row{{types.NewOkResult(0)}},
 			},
 			{
+				// https://github.com/dolthub/dolt/issues/10534
+				Query:    "SELECT CASE WHEN @@session.time_zone = 'SYSTEM' THEN @@system_time_zone ELSE @@session.time_zone END;",
+				Expected: []sql.Row{{"UTC"}},
+			},
+			{
 				Query:    "select from_unixtime(1)",
 				Expected: []sql.Row{{time.Unix(1, 0).In(time.UTC)}},
 			},
@@ -6175,10 +6212,10 @@ CREATE TABLE tab3 (
 						"0",
 						float64(0),
 						float64(0),
-						time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC),
+						time.Date(0, 0, 0, 0, 0, 0, 0, time.UTC),
 						types.Timespan(0),
-						time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC),
-						time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC),
+						time.Date(0, 0, 0, 0, 0, 0, 0, time.UTC),
+						time.Date(0, 0, 0, 0, 0, 0, 0, time.UTC),
 						0,
 						"",
 						"",
@@ -9610,9 +9647,9 @@ where
 			{
 				Query: "describe t;",
 				Expected: []sql.Row{
-					{"port1", "bigint", "NO", "", nil, ""},
-					{"port2", "bigint", "NO", "", nil, ""},
-					{"port3", "bigint", "NO", "", nil, ""},
+					{"port1", "bigint", "YES", "", nil, ""},
+					{"port2", "bigint", "YES", "", nil, ""},
+					{"port3", "bigint", "YES", "", nil, ""},
 				},
 			},
 		},
@@ -11385,6 +11422,46 @@ where
 		},
 	},
 	{
+		// https://github.com/dolthub/dolt/issues/10311
+		Name:    "enums with foreign keys and joins",
+		Dialect: "mysql",
+		SetUpScript: []string{
+			"create table animals(e enum('rat','ox','tiger','dog') primary key);",
+			"create table pets(e enum('cat','dog','fish','rat'), foreign key (e) references animals(e));",
+			"insert into animals values('rat');",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: "insert into pets values ('rat');",
+				// Error expected here because 'rat' has different underlying int values depending on the enum type
+				ExpectedErr: sql.ErrForeignKeyChildViolation,
+			},
+			{
+				Query: "insert into pets values ('cat');",
+				// Query OK expected here because the underlying int values are the same
+				Expected: []sql.Row{{types.NewOkResult(1)}},
+			},
+			{
+				Query: "select * from animals join pets on animals.e=pets.e;",
+				// Empty set expected here because comparison uses the string values when enum types are different
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "insert into animals values ('dog');",
+				Expected: []sql.Row{{types.NewOkResult(1)}},
+			},
+			{
+				Query: "insert into pets values ('rat');",
+				// 'rat' is now okay because it has the same underlying int value as 'dog' in the animals table
+				Expected: []sql.Row{{types.NewOkResult(1)}},
+			},
+			{
+				Query:    "select * from animals join pets on animals.e=pets.e;",
+				Expected: []sql.Row{{"rat", "rat"}},
+			},
+		},
+	},
+	{
 		Skip:    true,
 		Name:    "enums with foreign keys and cascade",
 		Dialect: "mysql",
@@ -12582,6 +12659,1118 @@ where
 			},
 		},
 	},
+	{
+		Name:    "signed int with overflowing filters",
+		Dialect: "mysql",
+		SetUpScript: []string{
+			"create table ti8  (i tinyint primary key);",
+			"insert into ti8 values (-128), (-1), (0), (1), (127);",
+
+			"create table ti16 (i smallint primary key);",
+			"insert into ti16 values (-32768), (-1), (0), (1), (32767);",
+
+			"create table ti24 (i mediumint primary key);",
+			"insert into ti24 values (-8388608), (-1), (0), (1), (8388607);",
+
+			"create table ti32 (i int primary key);",
+			"insert into ti32 values (-2147483648), (-1), (0), (1), (2147483647);",
+
+			"create table ti64 (i bigint primary key);",
+			"insert into ti64 values (-9223372036854775808), (-1), (0), (1), (9223372036854775807);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "select * from ti8 where i = 999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from ti8 where i = -999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti8 where i != 999;",
+				Expected: []sql.Row{
+					{-128},
+					{-1},
+					{0},
+					{1},
+					{127},
+				},
+			},
+			{
+				Query: "select * from ti8 where i != -999;",
+				Expected: []sql.Row{
+					{-128},
+					{-1},
+					{0},
+					{1},
+					{127},
+				},
+			},
+			{
+				Query:    "select * from ti8 where i > 999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti8 where i > -999;",
+				Expected: []sql.Row{
+					{-128},
+					{-1},
+					{0},
+					{1},
+					{127},
+				},
+			},
+			{
+				Query:    "select * from ti8 where i >= 999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti8 where i >= -999;",
+				Expected: []sql.Row{
+					{-128},
+					{-1},
+					{0},
+					{1},
+					{127},
+				},
+			},
+			{
+				Query: "select * from ti8 where i < 999;",
+				Expected: []sql.Row{
+					{-128},
+					{-1},
+					{0},
+					{1},
+					{127},
+				},
+			},
+			{
+				Query:    "select * from ti8 where i < -999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti8 where i <= 999;",
+				Expected: []sql.Row{
+					{-128},
+					{-1},
+					{0},
+					{1},
+					{127},
+				},
+			},
+			{
+				Query:    "select * from ti8 where i <= -999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti8 where i in (0, 999);",
+				Expected: []sql.Row{
+					{0},
+				},
+			},
+			{
+				Query: "select * from ti8 where i in (0, -999);",
+				Expected: []sql.Row{
+					{0},
+				},
+			},
+			{
+				Query: "select * from ti8 where i not in (0, 999);",
+				Expected: []sql.Row{
+					{-128},
+					{-1},
+					{1},
+					{127},
+				},
+			},
+			{
+				Query: "select * from ti8 where i not in (0, -999);",
+				Expected: []sql.Row{
+					{-128},
+					{-1},
+					{1},
+					{127},
+				},
+			},
+
+			{
+				Query:    "select * from ti16 where i = 99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from ti16 where i = -99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti16 where i != 99999;",
+				Expected: []sql.Row{
+					{-32768},
+					{-1},
+					{0},
+					{1},
+					{32767},
+				},
+			},
+			{
+				Query: "select * from ti16 where i != -99999;",
+				Expected: []sql.Row{
+					{-32768},
+					{-1},
+					{0},
+					{1},
+					{32767},
+				},
+			},
+			{
+				Query:    "select * from ti16 where i > 99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti16 where i > -99999;",
+				Expected: []sql.Row{
+					{-32768},
+					{-1},
+					{0},
+					{1},
+					{32767},
+				},
+			},
+			{
+				Query:    "select * from ti16 where i >= 99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti16 where i >= -99999;",
+				Expected: []sql.Row{
+					{-32768},
+					{-1},
+					{0},
+					{1},
+					{32767},
+				},
+			},
+			{
+				Query: "select * from ti16 where i < 99999;",
+				Expected: []sql.Row{
+					{-32768},
+					{-1},
+					{0},
+					{1},
+					{32767},
+				},
+			},
+			{
+				Query:    "select * from ti16 where i < -99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti16 where i <= 99999;",
+				Expected: []sql.Row{
+					{-32768},
+					{-1},
+					{0},
+					{1},
+					{32767},
+				},
+			},
+			{
+				Query:    "select * from ti16 where i <= -99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti16 where i in (0, 99999);",
+				Expected: []sql.Row{
+					{0},
+				},
+			},
+			{
+				Query: "select * from ti16 where i in (0, -99999);",
+				Expected: []sql.Row{
+					{0},
+				},
+			},
+			{
+				Query: "select * from ti16 where i not in (0, 99999);",
+				Expected: []sql.Row{
+					{-32768},
+					{-1},
+					{1},
+					{32767},
+				},
+			},
+			{
+				Query: "select * from ti16 where i not in (0, -99999);",
+				Expected: []sql.Row{
+					{-32768},
+					{-1},
+					{1},
+					{32767},
+				},
+			},
+
+			{
+				Query:    "select * from ti24 where i = 9999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from ti24 where i = -999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti24 where i != 9999999;",
+				Expected: []sql.Row{
+					{-8388608},
+					{-1},
+					{0},
+					{1},
+					{8388607},
+				},
+			},
+			{
+				Query: "select * from ti24 where i != -9999999;",
+				Expected: []sql.Row{
+					{-8388608},
+					{-1},
+					{0},
+					{1},
+					{8388607},
+				},
+			},
+			{
+				Query:    "select * from ti24 where i > 9999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti24 where i > -9999999;",
+				Expected: []sql.Row{
+					{-8388608},
+					{-1},
+					{0},
+					{1},
+					{8388607},
+				},
+			},
+			{
+				Query:    "select * from ti24 where i >= 9999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti24 where i >= -9999999;",
+				Expected: []sql.Row{
+					{-8388608},
+					{-1},
+					{0},
+					{1},
+					{8388607},
+				},
+			},
+			{
+				Query: "select * from ti24 where i < 9999999;",
+				Expected: []sql.Row{
+					{-8388608},
+					{-1},
+					{0},
+					{1},
+					{8388607},
+				},
+			},
+			{
+				Query:    "select * from ti24 where i < -9999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti24 where i <= 9999999;",
+				Expected: []sql.Row{
+					{-8388608},
+					{-1},
+					{0},
+					{1},
+					{8388607},
+				},
+			},
+			{
+				Query:    "select * from ti24 where i <= -9999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti24 where i in (0, 9999999);",
+				Expected: []sql.Row{
+					{0},
+				},
+			},
+			{
+				Query: "select * from ti24 where i in (0, -9999999);",
+				Expected: []sql.Row{
+					{0},
+				},
+			},
+			{
+				Query: "select * from ti24 where i not in (0, 9999999);",
+				Expected: []sql.Row{
+					{-8388608},
+					{-1},
+					{1},
+					{8388607},
+				},
+			},
+			{
+				Query: "select * from ti24 where i not in (0, -9999999);",
+				Expected: []sql.Row{
+					{-8388608},
+					{-1},
+					{1},
+					{8388607},
+				},
+			},
+
+			{
+				Query:    "select * from ti32 where i = 9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from ti32 where i = -9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti32 where i != 9999999999;",
+				Expected: []sql.Row{
+					{-2147483648},
+					{-1},
+					{0},
+					{1},
+					{2147483647},
+				},
+			},
+			{
+				Query: "select * from ti32 where i != -9999999999;",
+				Expected: []sql.Row{
+					{-2147483648},
+					{-1},
+					{0},
+					{1},
+					{2147483647},
+				},
+			},
+			{
+				Query:    "select * from ti32 where i > 9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti32 where i > -9999999999;",
+				Expected: []sql.Row{
+					{-2147483648},
+					{-1},
+					{0},
+					{1},
+					{2147483647},
+				},
+			},
+			{
+				Query:    "select * from ti32 where i >= 9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti32 where i >= -9999999999;",
+				Expected: []sql.Row{
+					{-2147483648},
+					{-1},
+					{0},
+					{1},
+					{2147483647},
+				},
+			},
+			{
+				Query: "select * from ti32 where i < 9999999999;",
+				Expected: []sql.Row{
+					{-2147483648},
+					{-1},
+					{0},
+					{1},
+					{2147483647},
+				},
+			},
+			{
+				Query:    "select * from ti32 where i < -9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti32 where i <= 9999999999;",
+				Expected: []sql.Row{
+					{-2147483648},
+					{-1},
+					{0},
+					{1},
+					{2147483647},
+				},
+			},
+			{
+				Query:    "select * from ti32 where i <= -9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti32 where i in (0, 9999999999);",
+				Expected: []sql.Row{
+					{0},
+				},
+			},
+			{
+				Query: "select * from ti32 where i in (0, -9999999999);",
+				Expected: []sql.Row{
+					{0},
+				},
+			},
+			{
+				Query: "select * from ti32 where i not in (0, 9999999999);",
+				Expected: []sql.Row{
+					{-2147483648},
+					{-1},
+					{1},
+					{2147483647},
+				},
+			},
+			{
+				Query: "select * from ti32 where i not in (0, -9999999999);",
+				Expected: []sql.Row{
+					{-2147483648},
+					{-1},
+					{1},
+					{2147483647},
+				},
+			},
+
+			{
+				Query:    "select * from ti64 where i = 9999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from ti64 where i = -9999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti64 where i != 9999999999999999999;",
+				Expected: []sql.Row{
+					{-9223372036854775808},
+					{-1},
+					{0},
+					{1},
+					{9223372036854775807},
+				},
+			},
+			{
+				Query: "select * from ti64 where i != -9999999999999999999;",
+				Expected: []sql.Row{
+					{-9223372036854775808},
+					{-1},
+					{0},
+					{1},
+					{9223372036854775807},
+				},
+			},
+			{
+				Query:    "select * from ti64 where i > 9999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti64 where i > -9999999999999999999;",
+				Expected: []sql.Row{
+					{-9223372036854775808},
+					{-1},
+					{0},
+					{1},
+					{9223372036854775807},
+				},
+			},
+			{
+				Query:    "select * from ti64 where i >= 9999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti64 where i >= -9999999999999999999;",
+				Expected: []sql.Row{
+					{-9223372036854775808},
+					{-1},
+					{0},
+					{1},
+					{9223372036854775807},
+				},
+			},
+			{
+				Query: "select * from ti64 where i < 9999999999999999999;",
+				Expected: []sql.Row{
+					{-9223372036854775808},
+					{-1},
+					{0},
+					{1},
+					{9223372036854775807},
+				},
+			},
+			{
+				Query:    "select * from ti64 where i < -9999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti64 where i <= 9999999999999999999;",
+				Expected: []sql.Row{
+					{-9223372036854775808},
+					{-1},
+					{0},
+					{1},
+					{9223372036854775807},
+				},
+			},
+			{
+				Query:    "select * from ti64 where i <= -9999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from ti64 where i in (0, 9999999999999999999);",
+				Expected: []sql.Row{
+					{0},
+				},
+			},
+			{
+				Query: "select * from ti64 where i in (0, -9999999999999999999);",
+				Expected: []sql.Row{
+					{0},
+				},
+			},
+			{
+				Query: "select * from ti64 where i not in (0, 9999999999999999999);",
+				Expected: []sql.Row{
+					{-9223372036854775808},
+					{-1},
+					{1},
+					{9223372036854775807},
+				},
+			},
+			{
+				Query: "select * from ti64 where i not in (0, -9999999999999999999);",
+				Expected: []sql.Row{
+					{-9223372036854775808},
+					{-1},
+					{1},
+					{9223372036854775807},
+				},
+			},
+		},
+	},
+	{
+		Name:    "unsigned int with overflowing filters",
+		Dialect: "mysql",
+		SetUpScript: []string{
+			"create table tui8 (i tinyint unsigned primary key);",
+			"insert into tui8 values (0), (1), (255);",
+
+			"create table tui16 (i smallint unsigned primary key);",
+			"insert into tui16 values (0), (1), (65535);",
+
+			"create table tui24 (i mediumint unsigned primary key);",
+			"insert into tui24 values (0), (1), (16777215);",
+
+			"create table tui32 (i int unsigned primary key);",
+			"insert into tui32 values (0), (1), (4294967295);",
+
+			"create table tui64 (i bigint unsigned primary key);",
+			"insert into tui64 values (0), (1), (18446744073709551615);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "select * from tui8 where i = 999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from tui8 where i = -999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui8 where i != 999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(255)},
+				},
+			},
+			{
+				Query: "select * from tui8 where i != -999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(255)},
+				},
+			},
+			{
+				Query:    "select * from tui8 where i > 999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui8 where i > -999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(255)},
+				},
+			},
+			{
+				Query:    "select * from tui8 where i >= 999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui8 where i >= -999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(255)},
+				},
+			},
+			{
+				Query: "select * from tui8 where i < 999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(255)},
+				},
+			},
+			{
+				Query:    "select * from tui8 where i < -999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui8 where i <= 999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(255)},
+				},
+			},
+			{
+				Query:    "select * from tui8 where i <= -999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui8 where i in (0, 999);",
+				Expected: []sql.Row{
+					{uint64(0)},
+				},
+			},
+			{
+				Query: "select * from tui8 where i in (0, -999);",
+				Expected: []sql.Row{
+					{uint64(0)},
+				},
+			},
+			{
+				Query: "select * from tui8 where i not in (0, 999);",
+				Expected: []sql.Row{
+					{uint64(1)},
+					{uint64(255)},
+				},
+			},
+			{
+				Query: "select * from tui8 where i not in (0, -999);",
+				Expected: []sql.Row{
+					{uint64(1)},
+					{uint64(255)},
+				},
+			},
+
+			{
+				Query:    "select * from tui16 where i = 99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from tui16 where i = -99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui16 where i != 99999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(65535)},
+				},
+			},
+			{
+				Query: "select * from tui16 where i != -99999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(65535)},
+				},
+			},
+			{
+				Query:    "select * from tui16 where i > 99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui16 where i > -99999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(65535)},
+				},
+			},
+			{
+				Query:    "select * from tui16 where i >= 99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui16 where i >= -99999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(65535)},
+				},
+			},
+			{
+				Query: "select * from tui16 where i < 99999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(65535)},
+				},
+			},
+			{
+				Query:    "select * from tui16 where i < -99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui16 where i <= 99999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(65535)},
+				},
+			},
+			{
+				Query:    "select * from tui16 where i <= -99999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui16 where i in (0, 99999);",
+				Expected: []sql.Row{
+					{uint64(0)},
+				},
+			},
+			{
+				Query: "select * from tui16 where i in (0, -99999);",
+				Expected: []sql.Row{
+					{uint64(0)},
+				},
+			},
+			{
+				Query: "select * from tui16 where i not in (0, 99999);",
+				Expected: []sql.Row{
+					{uint64(1)},
+					{uint64(65535)},
+				},
+			},
+			{
+				Query: "select * from tui16 where i not in (0, -99999);",
+				Expected: []sql.Row{
+					{uint64(1)},
+					{uint64(65535)},
+				},
+			},
+
+			{
+				Query:    "select * from tui24 where i = 99999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from tui24 where i = -9999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui24 where i != 99999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(16777215)},
+				},
+			},
+			{
+				Query: "select * from tui24 where i != -99999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(16777215)},
+				},
+			},
+			{
+				Query:    "select * from tui24 where i > 99999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui24 where i > -99999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(16777215)},
+				},
+			},
+			{
+				Query:    "select * from tui24 where i >= 99999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui24 where i >= -99999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(16777215)},
+				},
+			},
+			{
+				Query: "select * from tui24 where i < 99999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(16777215)},
+				},
+			},
+			{
+				Query:    "select * from tui24 where i < -99999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui24 where i <= 99999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(16777215)},
+				},
+			},
+			{
+				Query:    "select * from tui24 where i <= -99999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui24 where i in (0, 99999999);",
+				Expected: []sql.Row{
+					{uint64(0)},
+				},
+			},
+			{
+				Query: "select * from tui24 where i in (0, -99999999);",
+				Expected: []sql.Row{
+					{uint64(0)},
+				},
+			},
+			{
+				Query: "select * from tui24 where i not in (0, 99999999);",
+				Expected: []sql.Row{
+					{uint64(1)},
+					{uint64(16777215)},
+				},
+			},
+			{
+				Query: "select * from tui24 where i not in (0, -99999999);",
+				Expected: []sql.Row{
+					{uint64(1)},
+					{uint64(16777215)},
+				},
+			},
+
+			{
+				Query:    "select * from tui32 where i = 9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from tui32 where i = -9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui32 where i != 9999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(4294967295)},
+				},
+			},
+			{
+				Query: "select * from tui32 where i != -9999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(4294967295)},
+				},
+			},
+			{
+				Query:    "select * from tui32 where i > 9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui32 where i > -9999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(4294967295)},
+				},
+			},
+			{
+				Query:    "select * from tui32 where i >= 9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui32 where i >= -9999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(4294967295)},
+				},
+			},
+			{
+				Query: "select * from tui32 where i < 9999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(4294967295)},
+				},
+			},
+			{
+				Query:    "select * from tui32 where i < -9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui32 where i <= 9999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(4294967295)},
+				},
+			},
+			{
+				Query:    "select * from tui32 where i <= -9999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui32 where i in (0, 9999999999);",
+				Expected: []sql.Row{
+					{uint64(0)},
+				},
+			},
+			{
+				Query: "select * from tui32 where i in (0, -9999999999);",
+				Expected: []sql.Row{
+					{uint64(0)},
+				},
+			},
+			{
+				Query: "select * from tui32 where i not in (0, 9999999999);",
+				Expected: []sql.Row{
+					{uint64(1)},
+					{uint64(4294967295)},
+				},
+			},
+			{
+				Query: "select * from tui32 where i not in (0, -9999999999);",
+				Expected: []sql.Row{
+					{uint64(1)},
+					{uint64(4294967295)},
+				},
+			},
+
+			{
+				Query:    "select * from tui64 where i = 99999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select * from tui64 where i = -99999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui64 where i != 99999999999999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(18446744073709551615)},
+				},
+			},
+			{
+				Query: "select * from tui64 where i != -99999999999999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(18446744073709551615)},
+				},
+			},
+			{
+				Query:    "select * from tui64 where i > 99999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui64 where i > -99999999999999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(18446744073709551615)},
+				},
+			},
+			{
+				Query:    "select * from tui64 where i >= 99999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui64 where i >= -99999999999999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(18446744073709551615)},
+				},
+			},
+			{
+				Query: "select * from tui64 where i < 99999999999999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(18446744073709551615)},
+				},
+			},
+			{
+				Query:    "select * from tui64 where i < -99999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui64 where i <= 99999999999999999999;",
+				Expected: []sql.Row{
+					{uint64(0)},
+					{uint64(1)},
+					{uint64(18446744073709551615)},
+				},
+			},
+			{
+				Query:    "select * from tui64 where i <= -99999999999999999999;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query: "select * from tui64 where i in (0, 99999999999999999999);",
+				Expected: []sql.Row{
+					{uint64(0)},
+				},
+			},
+			{
+				Query: "select * from tui64 where i in (0, -99999999999999999999);",
+				Expected: []sql.Row{
+					{uint64(0)},
+				},
+			},
+			{
+				Query: "select * from tui64 where i not in (0, 99999999999999999999);",
+				Expected: []sql.Row{
+					{uint64(1)},
+					{uint64(18446744073709551615)},
+				},
+			},
+			{
+				Query: "select * from tui64 where i not in (0, -99999999999999999999);",
+				Expected: []sql.Row{
+					{uint64(1)},
+					{uint64(18446744073709551615)},
+				},
+			},
+		},
+	},
 
 	// Float Tests
 	{
@@ -13406,6 +14595,291 @@ select * from t1 except (
 			{
 				Query:    "select * from (select id, name, description, archived from t0 as test0 where (id in (select id from t0))) as dummy_alias order by dummy_alias.name asc;",
 				Expected: []sql.Row{{1, "first", "abc", 0}},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10064
+		Name: "Hoist out of scope filters for left and right sides of union",
+		SetUpScript: []string{
+			"create table t1(c0 int, c1 varchar(500))",
+			"insert into t1(c1, c0) values ('-1',1),('-2',2)",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				// Ensures that out of scope filters are hoisted
+				Query: "SELECT * FROM t1 WHERE NOT EXISTS (SELECT 1 FROM (SELECT NULL WHERE FALSE) AS sub0 WHERE (t1.c0)*(t1.c0)) union all SELECT * FROM t1 WHERE NOT EXISTS (SELECT 1 FROM (SELECT NULL WHERE FALSE) AS sub0 WHERE (t1.c0)*(t1.c0));",
+				Expected: []sql.Row{
+					{1, "-1"},
+					{2, "-2"},
+					{1, "-1"},
+					{2, "-2"},
+				},
+			},
+			{
+				// Ensures that antijoin iterator works correctly
+				Query: "SELECT * FROM t1 WHERE NOT EXISTS (SELECT 1 FROM (SELECT NULL WHERE FALSE) AS sub0) union all SELECT * FROM t1 WHERE NOT EXISTS (SELECT 1 FROM (SELECT NULL WHERE FALSE) AS sub0);",
+				Expected: []sql.Row{
+					{1, "-1"},
+					{2, "-2"},
+					{1, "-1"},
+					{2, "-2"},
+				},
+			},
+		},
+	},
+	{
+		Name: "NOT EXISTS with nullable filter",
+		SetUpScript: []string{
+			"CREATE TABLE t0(c0 INT , c1 INT);",
+			"INSERT INTO t0(c0, c1) VALUES (1, -2);",
+			"create table t1(c0 int, primary key(c0))",
+			"insert into t1 values (1)",
+			"create table t2(c0 varchar(500), primary key(c0))",
+			"insert into t2 values ('9')",
+			"create table t3(c0 boolean, primary key(c0))",
+			"insert into t3 values(false)",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				// https://github.com/dolthub/dolt/issues/10070
+				Query:    `SELECT * FROM t0 WHERE NOT EXISTS (SELECT 1 FROM (SELECT 1) alias0 WHERE (CASE -1 WHEN t0.c1 THEN false END));`,
+				Expected: []sql.Row{{1, -2}},
+			},
+			{
+				// https://github.com/dolthub/dolt/issues/10092
+				Query:    "select * from t1 where not exists (select 1 from (select 1) as subquery where weekday(t1.c0))",
+				Expected: []sql.Row{{1}},
+			},
+			{
+				// https://github.com/dolthub/dolt/issues/10102
+				Query:    "SELECT * FROM t2 WHERE NOT EXISTS (SELECT 1 FROM (SELECT 1) AS sub0 WHERE ASIN(t2.c0));",
+				Expected: []sql.Row{{"9"}},
+				// Postgres does not allow varchar types as inputs for ASIN
+				Dialect: "mysql",
+			},
+			{
+				// https://github.com/dolthub/dolt/issues/10157
+				Query:    "SELECT * FROM t3 WHERE NOT EXISTS (SELECT 1 FROM (SELECT 1) AS sub0 WHERE LOG2(t3.c0));",
+				Expected: []sql.Row{{0}},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10234
+		Name: "NOT EXISTS with nullable column in OR filter",
+		SetUpScript: []string{
+			"create table t0(c0 boolean)",
+			"create table t1(c0 boolean)",
+			"insert into t0 values (null)",
+			"insert into t1 values (true)",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "SELECT * FROM t1 WHERE NOT EXISTS (SELECT 1 FROM t0 WHERE (t0.c0)OR(t1.c0))",
+				Expected: []sql.Row{},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10243
+		Dialect: "mysql",
+		Name:    "OR filters are simplified to correct type",
+		SetUpScript: []string{
+			"create table t0(c1 boolean)",
+			"insert into t0 values (true)",
+			"create table t1(c1 int)",
+			"insert into t1 values (2)",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "select 1 from t0 where (19 or 's') != (7 != t0.c1);",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "SELECT * FROM t1 WHERE NOT EXISTS (SELECT 1 FROM t0 WHERE ((((19)OR('s')))!=(((7)!=(t0.c1)))));",
+				Expected: []sql.Row{{2}},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10258
+		Name: "WHERE NOT EXISTS from empty view",
+		SetUpScript: []string{
+			"CREATE TABLE t1(c0 boolean, c1 boolean);",
+			"insert into t1(c0) values (true), (false)",
+			"create view v0(c0) as select true having false",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "SELECT * from t1 where not exists (select 1 from v0 where (case t1.c1 when false then v0.c0 else t1.c0 end)) order by c0",
+				Expected: []sql.Row{{0, nil}, {1, nil}},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10246
+		Dialect: "mysql",
+		Name:    "boolean keys are not used for string column lookups",
+		SetUpScript: []string{
+			"create table t1(c0 varchar(500), primary key(c0))",
+			"insert into t1(c0) values ('')",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "select 1 from t1 where false=t1.c0",
+				Expected: []sql.Row{{1}},
+			},
+		},
+	},
+	{
+		Name: "Between filter",
+		SetUpScript: []string{
+			"create table test(x int, y int, z int);",
+			`insert into test values
+                     (null, 0, 0),
+                     (1, null, 1),
+                     (2, 2, null),
+                     (3, 2, 4),
+                     (4, 2, 3),
+                     (5, 6, 7),
+                     (6, 6, 5),
+                     (7, 8, 7),
+                     (8, 9, 7)`,
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: `select x, y, z,
+       						(x between y and z), (x between x and z), (x between y and x), (x between y and y),
+       						(x between x and x) from test order by x`,
+				Expected: []sql.Row{
+					{nil, 0, 0, nil, nil, nil, nil, nil},
+					{1, nil, 1, nil, true, nil, nil, true},
+					{2, 2, nil, nil, nil, true, true, true},
+					{3, 2, 4, true, true, true, false, true},
+					{4, 2, 3, false, false, true, false, true},
+					{5, 6, 7, false, true, false, false, true},
+					{6, 6, 5, false, false, true, true, true},
+					{7, 8, 7, false, true, false, false, true},
+					{8, 9, 7, false, false, false, false, true},
+				},
+			},
+			{
+				Query:    "select x from test where (x between y and z) order by x",
+				Expected: []sql.Row{{3}},
+			},
+			{
+				Query:    "select x from test where (x between x and z) order by x",
+				Expected: []sql.Row{{1}, {3}, {5}, {7}},
+			},
+			{
+				Query:    "select x from test where (x between y and x) order by x",
+				Expected: []sql.Row{{2}, {3}, {4}, {6}},
+			},
+			{
+				Query:    "select x from test where (x between y and y) order by x",
+				Expected: []sql.Row{{2}, {6}},
+			},
+			{
+				Query:    "select x from test where (x between x and x) order by x",
+				Expected: []sql.Row{{1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}},
+			},
+		},
+	},
+	{
+		Name: "Subqueries inside NOT EXISTS clause with correlated column filter",
+		SetUpScript: []string{
+			"CREATE TABLE issues (id INT PRIMARY KEY, title TEXT, status TEXT);",
+			"CREATE TABLE dependencies (issue_id INT, depends_on_id INT, type TEXT);",
+			`INSERT INTO issues (id, title, status) VALUES
+					(1, 'Login API',        'open'),
+					(2, 'Auth Library',    'in_progress'),
+					(3, 'User Profile',    'open'),
+					(4, 'Profile UI',      'open'),
+					(5, 'Settings Page',   'open'),
+					(6, 'Marketing Page',  'open'),
+					(7, 'Old Feature',     'closed');`,
+			`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES
+					(3, 1, 'blocks'),
+					(3, 2, 'blocks'),
+					(4, 3, 'parent-child'),
+					(5, 4, 'parent-child');`,
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				// https://github.com/dolthub/dolt/issues/10472
+				Query: `WITH RECURSIVE
+					  blocked_directly AS (
+						SELECT DISTINCT d.issue_id
+						FROM dependencies d
+						JOIN issues blocker ON d.depends_on_id = blocker.id
+						WHERE d.type = 'blocks'
+						  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+					  ),
+					  blocked_transitively AS (
+						SELECT issue_id, 0 as depth
+						FROM blocked_directly
+						UNION ALL
+						SELECT d.issue_id, bt.depth + 1
+						FROM blocked_transitively bt
+						JOIN dependencies d ON d.depends_on_id = bt.issue_id
+						WHERE d.type = 'parent-child'
+						  AND bt.depth < 50
+					  )
+					SELECT i.*
+					FROM issues i
+					WHERE i.status = 'open'
+					  AND NOT EXISTS (
+						SELECT 1 FROM blocked_transitively WHERE issue_id = i.id
+					  );`,
+				Expected: []sql.Row{{1, "Login API", "open"}, {6, "Marketing Page", "open"}},
+			},
+			{
+				Query: `WITH blocked_directly AS (
+						SELECT DISTINCT d.issue_id
+						FROM dependencies d
+						JOIN issues blocker ON d.depends_on_id = blocker.id
+						WHERE d.type = 'blocks'
+						  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+					  )
+					SELECT i.id
+					FROM issues i
+					WHERE i.status = 'open'
+					  AND NOT EXISTS (
+						SELECT 1 FROM blocked_directly WHERE issue_id = i.id
+					  );`,
+				Expected: []sql.Row{{1}, {4}, {5}, {6}},
+			},
+			{
+				Query: `SELECT i.id
+						FROM issues i
+						WHERE i.status = 'open'
+						  AND NOT EXISTS (
+							SELECT 1 FROM (
+					  SELECT DISTINCT d.issue_id
+						FROM dependencies d
+						JOIN issues blocker ON d.depends_on_id = blocker.id
+						WHERE d.type = 'blocks' AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+					) as blocked WHERE blocked.issue_id = i.id);`,
+				Expected: []sql.Row{{1}, {4}, {5}, {6}},
+			},
+		},
+	},
+	{
+		Name: "Greatest and least with decimal arguments",
+		// TODO: This should work in Doltgres https://github.com/dolthub/doltgresql/issues/2378
+		Dialect: "mysql",
+		SetUpScript: []string{
+			"create table t(a decimal(6, 2), b decimal(8, 5), c decimal(5, 1));",
+			"insert into t values (2.75, 8.8, 3.1);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				// https://github.com/dolthub/dolt/issues/10562
+				Query: "select greatest(a, b, c), least(a, b, c) from t;",
+				// TODO: greatest and least currently return a float64 for decimals. MySQL returns a decimal with the
+				//  highest precision https://github.com/dolthub/dolt/issues/10567
+				Expected: []sql.Row{{8.8, 2.75}},
 			},
 		},
 	},

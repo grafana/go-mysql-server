@@ -189,11 +189,8 @@ func applyForeignKeysToNodes(ctx *sql.Context, a *Analyzer, n sql.Node, cache *f
 		if n.HasExplicitTargets() {
 			return n.WithExplicitTargets(foreignKeyHandlers), transform.NewTree, nil
 		} else {
-			newNode, err := n.WithChildren(foreignKeyHandlers...)
-			if err != nil {
-				return nil, transform.SameTree, err
-			}
-			return newNode, transform.NewTree, nil
+			// For simple DELETEs, update the targets array with foreign key handlers.
+			return n.WithTargets(foreignKeyHandlers), transform.NewTree, nil
 		}
 	default:
 		return n, transform.SameTree, nil
@@ -483,7 +480,7 @@ func getForeignKeyHandlerFromUpdateTarget(ctx *sql.Context, a *Analyzer, updateT
 // be evaluated in the context of a single table.
 func resolveSchemaDefaults(ctx *sql.Context, catalog *Catalog, table sql.Table) (sql.Schema, error) {
 	// Resolve any column default expressions in tblSch
-	builder := planbuilder.New(ctx, catalog, nil, sql.GlobalParser)
+	builder := planbuilder.New(ctx, catalog, nil)
 	childTblSch := builder.ResolveSchemaDefaults(ctx.GetCurrentDatabase(), table.Name(), table.Schema())
 
 	// Field Indexes are off by one initially and don't fixed by assignExecIndexes because it doesn't traverse through

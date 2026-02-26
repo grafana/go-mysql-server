@@ -18,6 +18,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/dolthub/go-mysql-server/errguard"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/expression/function/aggregation"
 	"github.com/dolthub/go-mysql-server/sql/hash"
@@ -127,12 +128,16 @@ func newGroupByGroupingIter(
 	selectedExprs, groupByExprs []sql.Expression,
 	child sql.RowIter,
 ) *groupByGroupingIter {
+	keySch := make(sql.Schema, len(groupByExprs))
+	for i := range groupByExprs {
+		keySch[i] = &sql.Column{Type: groupByExprs[i].Type()}
+	}
 	return &groupByGroupingIter{
 		selectedExprs: selectedExprs,
 		groupByExprs:  groupByExprs,
 		child:         child,
 		keyRow:        make(sql.Row, len(groupByExprs)),
-		keySch:        make(sql.Schema, len(groupByExprs)),
+		keySch:        keySch,
 	}
 }
 
@@ -163,43 +168,60 @@ func (i *groupByGroupingIter) Next(ctx *sql.Context) (sql.Row, error) {
 }
 
 func (i *groupByGroupingIter) compute(ctx *sql.Context) error {
-	for {
-		row, err := i.child.Next(ctx)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return err
-		}
+	eg, subCtx := ctx.NewErrgroup()
 
-		key, err := i.groupingKey(ctx, i.groupByExprs, row)
-		if err != nil {
-			return err
-		}
-
-		b, err := i.get(key)
-		if errors.Is(err, sql.ErrKeyNotFound) {
-			b = make([]sql.AggregationBuffer, len(i.selectedExprs))
-			for j, a := range i.selectedExprs {
-				b[j], err = newAggregationBuffer(a)
-				if err != nil {
-					return err
+	var rowChan = make(chan sql.Row, 512)
+	errguard.Go(eg, func() error {
+		defer close(rowChan)
+		for {
+			row, err := i.child.Next(subCtx)
+			if err != nil {
+				if err == io.EOF {
+					return nil
 				}
+				return err
 			}
+			rowChan <- row
+		}
+	})
 
-			if err := i.aggregations.Put(key, b); err != nil {
+	errguard.Go(eg, func() error {
+		for {
+			row, ok := <-rowChan
+			if !ok {
+				return nil
+			}
+			key, err := i.groupingKey(subCtx, row)
+			if err != nil {
 				return err
 			}
 
-			i.keys = append(i.keys, key)
-		} else if err != nil {
-			return err
+			buf, err := i.get(key)
+			if errors.Is(err, sql.ErrKeyNotFound) {
+				buf = make([]sql.AggregationBuffer, len(i.selectedExprs))
+				for j, a := range i.selectedExprs {
+					buf[j], err = newAggregationBuffer(a)
+					if err != nil {
+						return err
+					}
+				}
+				if err = i.aggregations.Put(key, buf); err != nil {
+					return err
+				}
+				i.keys = append(i.keys, key)
+			} else if err != nil {
+				return err
+			}
+			err = updateBuffers(subCtx, buf, row)
+			if err != nil {
+				return err
+			}
 		}
+	})
 
-		err = updateBuffers(ctx, b, row)
-		if err != nil {
-			return err
-		}
+	err := eg.Wait()
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -213,7 +235,7 @@ func (i *groupByGroupingIter) get(key uint64) ([]sql.AggregationBuffer, error) {
 	if v == nil {
 		return nil, nil
 	}
-	return v.([]sql.AggregationBuffer), err
+	return v.([]sql.AggregationBuffer), nil
 }
 
 func (i *groupByGroupingIter) put(key uint64, val []sql.AggregationBuffer) error {
@@ -242,8 +264,8 @@ func (i *groupByGroupingIter) Dispose() {
 	}
 }
 
-func (i *groupByGroupingIter) groupingKey(ctx *sql.Context, exprs []sql.Expression, row sql.Row) (uint64, error) {
-	for idx, expr := range exprs {
+func (i *groupByGroupingIter) groupingKey(ctx *sql.Context, row sql.Row) (uint64, error) {
+	for idx, expr := range i.groupByExprs {
 		v, err := expr.Eval(ctx, row)
 		if err != nil {
 			return 0, err
@@ -260,7 +282,6 @@ func (i *groupByGroupingIter) groupingKey(ctx *sql.Context, exprs []sql.Expressi
 		}
 
 		i.keyRow[idx] = v
-		i.keySch[idx] = &sql.Column{Type: typ}
 	}
 	return hash.HashOf(ctx, i.keySch, i.keyRow)
 }

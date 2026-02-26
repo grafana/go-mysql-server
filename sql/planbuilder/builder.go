@@ -17,7 +17,6 @@ package planbuilder
 import (
 	"fmt"
 	"strings"
-	"sync"
 
 	ast "github.com/dolthub/vitess/go/vt/sqlparser"
 
@@ -27,10 +26,6 @@ import (
 	"github.com/dolthub/go-mysql-server/sql/plan"
 	"github.com/dolthub/go-mysql-server/sql/transform"
 )
-
-var BinderFactory = &sync.Pool{New: func() interface{} {
-	return &Builder{f: &factory{}}
-}}
 
 type Builder struct {
 	// EventScheduler is used to communicate with the event scheduler
@@ -58,6 +53,7 @@ type Builder struct {
 	multiDDL     bool
 	insertActive bool
 	parserOpts   ast.ParserOptions
+	overrides    sql.BuilderOverrides
 }
 
 // BindvarContext holds bind variable replacement literals.
@@ -103,6 +99,7 @@ type TriggerContext struct {
 	UnresolvedTables []string
 	Active           bool
 	Call             bool
+	LoadOnly         bool
 }
 
 // ProcContext allows nested CALLs to use the same database for resolving
@@ -112,15 +109,19 @@ type ProcContext struct {
 	DbName string
 }
 
-// New takes ctx, catalog, event scheduler, and parser. If the parser is nil, then default parser is mysql parser.
-func New(ctx *sql.Context, cat sql.Catalog, es sql.EventScheduler, p sql.Parser) *Builder {
-	if p == nil {
-		p = sql.GlobalParser
-	}
-
+// New takes ctx, catalog, event scheduler, and parser. If the parser is nil, then the default parser is used (which
+// will be the MySQL parser unless modified).
+func New(ctx *sql.Context, cat sql.Catalog, es sql.EventScheduler) *Builder {
+	// TODO: move the event scheduler to the catalog
 	var state sql.AuthorizationQueryState
+	var overrides sql.BuilderOverrides
+	var p = sql.DefaultMySQLParser
 	if cat != nil {
 		state = cat.AuthorizationHandler().NewQueryState(ctx)
+		overrides = cat.Overrides().Builder
+		if overrides.Parser != nil {
+			p = overrides.Parser
+		}
 	}
 	return &Builder{
 		ctx:            ctx,
@@ -132,6 +133,7 @@ func New(ctx *sql.Context, cat sql.Catalog, es sql.EventScheduler, p sql.Parser)
 		qFlags:         &sql.QueryFlags{},
 		authEnabled:    true,
 		authQueryState: state,
+		overrides:      overrides,
 	}
 }
 
@@ -307,7 +309,7 @@ func (b *Builder) buildSubquery(inScope *scope, stmt ast.Statement, subQuery str
 		}
 		outScope = inScope.push()
 		startRep := plan.NewStartReplica()
-		if binCat, ok := b.cat.(binlogreplication.BinlogReplicaCatalog); ok && binCat.HasBinlogReplicaController() {
+		if binCat, ok := b.cat.(binlogreplication.BinlogReplicaProvider); ok && binCat.HasBinlogReplicaController() {
 			startRep.ReplicaController = binCat.GetBinlogReplicaController()
 		}
 		outScope.node = startRep
@@ -317,7 +319,7 @@ func (b *Builder) buildSubquery(inScope *scope, stmt ast.Statement, subQuery str
 		}
 		outScope = inScope.push()
 		stopRep := plan.NewStopReplica()
-		if binCat, ok := b.cat.(binlogreplication.BinlogReplicaCatalog); ok && binCat.HasBinlogReplicaController() {
+		if binCat, ok := b.cat.(binlogreplication.BinlogReplicaProvider); ok && binCat.HasBinlogReplicaController() {
 			stopRep.ReplicaController = binCat.GetBinlogReplicaController()
 		}
 		outScope.node = stopRep
@@ -327,7 +329,7 @@ func (b *Builder) buildSubquery(inScope *scope, stmt ast.Statement, subQuery str
 		}
 		outScope = inScope.push()
 		resetRep := plan.NewResetReplica(n.All)
-		if binCat, ok := b.cat.(binlogreplication.BinlogReplicaCatalog); ok && binCat.HasBinlogReplicaController() {
+		if binCat, ok := b.cat.(binlogreplication.BinlogReplicaProvider); ok && binCat.HasBinlogReplicaController() {
 			resetRep.ReplicaController = binCat.GetBinlogReplicaController()
 		}
 		outScope.node = resetRep
@@ -401,6 +403,16 @@ func (b *Builder) buildSubquery(inScope *scope, stmt ast.Statement, subQuery str
 		return b.buildDeallocate(inScope, n)
 	case ast.InjectedStatement:
 		return b.buildInjectedStatement(inScope, n)
+	case *ast.Binlog:
+		if err := b.cat.AuthorizationHandler().HandleAuth(b.ctx, b.authQueryState, n.Auth); err != nil && b.authEnabled {
+			b.handleErr(err)
+		}
+		outScope = inScope.push()
+		binlogNode := plan.NewBinlog(n.Base64Str)
+		if binCat, ok := b.cat.(binlogreplication.BinlogConsumerProvider); ok && binCat.HasBinlogConsumer() {
+			binlogNode = binlogNode.WithBinlogConsumer(binCat.GetBinlogConsumer()).(*plan.Binlog)
+		}
+		outScope.node = binlogNode
 	}
 	return
 }

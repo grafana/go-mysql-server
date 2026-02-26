@@ -60,61 +60,103 @@ func HashOf(ctx *sql.Context, sch sql.Schema, row sql.Row) (uint64, error) {
 			return 0, fmt.Errorf("error unwrapping value: %w", err)
 		}
 
-		// TODO: we may not always have the type information available, so we check schema length.
-		//  Then, defer to original behavior
-		if i >= len(sch) || v == nil {
-			_, err := fmt.Fprintf(hash, "%v", v)
-			if err != nil {
+		if v == nil {
+			if _, err := hash.WriteString("<nil>"); err != nil {
 				return 0, err
 			}
 			continue
 		}
 
-		switch typ := sch[i].Type.(type) {
-		case sql.ExtendedType:
-			// TODO: Doltgres follows Postgres conventions which don't align with the expectations of MySQL,
-			//  so we're using the old (probably incorrect) behavior for now
-			_, err = fmt.Fprintf(hash, "%v", v)
-			if err != nil {
-				return 0, err
+		// TODO: we may not always have the type information available, so we check schema length.
+		//  Then, defer to original behavior
+		if i < len(sch) {
+			switch typ := sch[i].Type.(type) {
+			case sql.ExtendedType:
+				// TODO: Doltgres follows Postgres conventions which don't align with the expectations of MySQL,
+				//  so we're using the old (probably incorrect) behavior for now
+				_, err := hash.WriteString(fmt.Sprintf("%v", v))
+				if err != nil {
+					return 0, err
+				}
+				continue
+			case types.StringType:
+				var strVal string
+				strVal, err = types.ConvertToString(ctx, v, typ, nil)
+				if err != nil {
+					return 0, err
+				}
+				err = typ.Collation().WriteWeightString(hash, strVal)
+				if err != nil {
+					return 0, err
+				}
+				continue
 			}
-		case types.StringType:
-			var strVal string
-			strVal, err = types.ConvertToString(ctx, v, typ, nil)
-			if err != nil {
-				return 0, err
+		}
+		switch v := v.(type) {
+		case int:
+			_, err = hash.WriteString(strconv.FormatInt(int64(v), 10))
+		case int8:
+			_, err = hash.WriteString(strconv.FormatInt(int64(v), 10))
+		case int16:
+			_, err = hash.WriteString(strconv.FormatInt(int64(v), 10))
+		case int32:
+			_, err = hash.WriteString(strconv.FormatInt(int64(v), 10))
+		case int64:
+			_, err = hash.WriteString(strconv.FormatInt(v, 10))
+		case uint:
+			_, err = hash.WriteString(strconv.FormatUint(uint64(v), 10))
+		case uint8:
+			_, err = hash.WriteString(strconv.FormatUint(uint64(v), 10))
+		case uint16:
+			_, err = hash.WriteString(strconv.FormatUint(uint64(v), 10))
+		case uint32:
+			_, err = hash.WriteString(strconv.FormatUint(uint64(v), 10))
+		case uint64:
+			_, err = hash.WriteString(strconv.FormatUint(v, 10))
+		case float32:
+			str := strconv.FormatFloat(float64(v), 'f', -1, 32)
+			if str == "-0" {
+				str = "0"
 			}
-			err = typ.Collation().WriteWeightString(hash, strVal)
-			if err != nil {
-				return 0, err
+			_, err = hash.WriteString(str)
+		case float64:
+			str := strconv.FormatFloat(v, 'f', -1, 64)
+			if str == "-0" {
+				str = "0"
 			}
+			_, err = hash.WriteString(str)
+		case string:
+			_, err = hash.WriteString(v)
+		case []byte:
+			_, err = hash.Write(v)
 		default:
-			// TODO: probably much faster to do this with a type switch
-			_, err = fmt.Fprintf(hash, "%v", v)
-			if err != nil {
-				return 0, err
-			}
+			_, err = hash.WriteString(fmt.Sprintf("%v", v))
+		}
+		if err != nil {
+			return 0, err
 		}
 	}
 	return hash.Sum64(), nil
 }
 
 // HashOfSimple returns a hash for a single interface value
-func HashOfSimple(ctx *sql.Context, i interface{}, t sql.Type) (uint64, error) {
+func HashOfSimple(ctx *sql.Context, i any, t sql.Type) (uint64, sql.ConvertInRange, error) {
 	if i == nil {
-		return 0, nil
+		return 0, sql.InRange, nil
 	}
 
 	var str string
+	var inRange sql.ConvertInRange
 	coll := sql.Collation_Default
 	if types.IsTuple(t) {
-		tup := i.([]interface{})
+		tup := i.([]any)
 		tupType := t.(types.TupleType)
 		hashes := make([]uint64, len(tup))
 		for idx, v := range tup {
-			h, err := HashOfSimple(ctx, v, tupType[idx])
+			// TODO: handle out of range conversions here?
+			h, _, err := HashOfSimple(ctx, v, tupType[idx])
 			if err != nil {
-				return 0, err
+				return 0, sql.InRange, err
 			}
 			hashes[idx] = h
 		}
@@ -124,23 +166,25 @@ func HashOfSimple(ctx *sql.Context, i interface{}, t sql.Type) (uint64, error) {
 		if s, ok := i.(string); ok {
 			str = s
 		} else {
-			converted, err := types.ConvertOrTruncate(ctx, i, t)
+			converted, _, err := types.ConvertOrTruncate(ctx, i, t)
 			if err != nil {
-				return 0, err
+				return 0, sql.InRange, err
 			}
 			str, _, err = sql.Unwrap[string](ctx, converted)
 			if err != nil {
-				return 0, err
+				return 0, sql.InRange, err
 			}
 		}
 	} else {
-		x, err := types.ConvertOrTruncate(ctx, i, t.Promote())
+		var val any
+		var err error
+		val, inRange, err = types.ConvertOrTruncate(ctx, i, t.Promote())
 		if err != nil {
-			return 0, err
+			return 0, sql.InRange, err
 		}
 
 		// Remove trailing 0s from floats
-		switch v := x.(type) {
+		switch v := val.(type) {
 		case float32:
 			str = strconv.FormatFloat(float64(v), 'f', -1, 32)
 			if str == "-0" {
@@ -157,5 +201,9 @@ func HashOfSimple(ctx *sql.Context, i interface{}, t sql.Type) (uint64, error) {
 	}
 
 	// Collated strings that are equivalent may have different runes, so we must make them hash to the same value
-	return coll.HashToUint(str)
+	h, err := coll.HashToUint(str)
+	if err != nil {
+		return 0, sql.InRange, err
+	}
+	return h, inRange, nil
 }

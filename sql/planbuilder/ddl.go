@@ -41,9 +41,9 @@ func (b *Builder) resolveDb(name string) sql.Database {
 	}
 
 	// todo show tables as of expects privileged
-	//if privilegedDatabase, ok := database.(mysql_db.PrivilegedDatabase); ok {
+	// if privilegedDatabase, ok := database.(mysql_db.PrivilegedDatabase); ok {
 	//	database = privilegedDatabase.Unwrap()
-	//}
+	// }
 	return database
 }
 
@@ -617,6 +617,7 @@ func (b *Builder) buildAlterTableClause(inScope *scope, ddl *ast.DDL) []*scope {
 						sql.IndexUsing_BTree,
 						sql.IndexConstraint_Unique,
 						[]sql.IndexColumn{{Name: column.Name.String()}},
+						nil,
 						"",
 					)
 
@@ -848,7 +849,7 @@ func (b *Builder) buildIndexDefs(_ *scope, spec *ast.TableSpec) (idxDefs sql.Ind
 		}
 		idxDefs = append(idxDefs, &sql.IndexDef{
 			Name:       idxDef.Info.Name.String(),
-			Storage:    sql.IndexUsing_Default, //TODO: add vitess support for USING
+			Storage:    sql.IndexUsing_Default, // TODO: add vitess support for USING
 			Constraint: constraint,
 			Columns:    columns,
 			Comment:    comment,
@@ -981,6 +982,11 @@ func (b *Builder) buildAlterIndex(inScope *scope, ddl *ast.DDL, table *plan.Reso
 
 		columns := b.gatherIndexColumns(ddl.IndexSpec.Columns)
 
+		var indexExpr sql.Expression
+		if ddl.IndexSpec.Expression != nil {
+			indexExpr = b.buildScalar(inScope, ddl.IndexSpec.Expression)
+		}
+
 		var comment string
 		for _, option := range ddl.IndexSpec.Options {
 			if strings.ToLower(option.Name) == strings.ToLower(ast.KeywordString(ast.COMMENT_KEYWORD)) {
@@ -1007,6 +1013,7 @@ func (b *Builder) buildAlterIndex(inScope *scope, ddl *ast.DDL, table *plan.Reso
 			using,
 			constraint,
 			columns,
+			indexExpr,
 			comment,
 		)
 		outScope.node = b.modifySchemaTarget(inScope, createIndex, table.Schema())
@@ -1726,11 +1733,12 @@ func (b *Builder) resolveColumnDefaultExpression(inScope *scope, columnDef *sql.
 
 	// Empty string is a special case, it means the default value is the empty string
 	// TODO: why isn't this serialized as ''
-	if def.String() == "" {
+	defStr := def.String()
+	if defStr == "" {
 		return b.convertDefaultExpression(inScope, &ast.SQLVal{Val: []byte{}, Type: ast.StrVal}, columnDef.Type, columnDef.Nullable)
 	}
 
-	parsed, err := b.parser.ParseSimple(fmt.Sprintf("SELECT %s", def))
+	parsed, err := b.parser.ParseSimple("SELECT " + defStr)
 	if err != nil {
 		err := sql.ErrInvalidColumnDefaultValue.Wrap(err, def)
 		b.handleErr(err)
@@ -1856,13 +1864,22 @@ func (b *Builder) buildDBDDL(inScope *scope, c *ast.DBDDL) (outScope *scope) {
 			createSchema := plan.NewCreateSchema(c.DBName, c.IfNotExists, collation)
 			createSchema.Catalog = b.cat
 			node = createSchema
+		default:
+			b.handleErr(sql.ErrUnsupportedSyntax.New(ast.String(c)))
 		}
 
 		outScope.node = node
 	case ast.DropStr:
-		dropDb := plan.NewDropDatabase(c.DBName, c.IfExists)
-		dropDb.Catalog = b.cat
-		outScope.node = dropDb
+		switch c.SchemaOrDatabase {
+		case "database":
+			node := plan.NewDropDatabase(c.DBName, c.IfExists)
+			node.Catalog = b.cat
+			outScope.node = node
+		case "schema":
+			node := plan.NewDropSchema(c.DBName, c.IfExists)
+			node.Catalog = b.cat
+			outScope.node = node
+		}
 	case ast.AlterStr:
 		if len(c.CharsetCollate) == 0 {
 			if len(c.DBName) > 0 {

@@ -32,19 +32,6 @@ const maxAnalysisIterations = 8
 // ErrMaxAnalysisIters is thrown when the analysis iterations are exceeded
 var ErrMaxAnalysisIters = errors.NewKind("exceeded max analysis iterations (%d)")
 
-// Parse parses the given SQL |query| using the default parsing settings and returns the corresponding node.
-func Parse(ctx *sql.Context, cat sql.Catalog, query string) (sql.Node, *sql.QueryFlags, error) {
-	return ParseWithOptions(ctx, cat, query, sql.LoadSqlMode(ctx).ParserOptions())
-}
-
-func ParseWithOptions(ctx *sql.Context, cat sql.Catalog, query string, options ast.ParserOptions) (sql.Node, *sql.QueryFlags, error) {
-	// TODO: need correct parser
-	b := New(ctx, cat, nil, nil)
-	b.SetParserOptions(options)
-	node, _, _, qFlags, err := b.Parse(query, nil, false)
-	return node, qFlags, err
-}
-
 func (b *Builder) Parse(query string, qFlags *sql.QueryFlags, multi bool) (ret sql.Node, parsed, remainder string, qProps *sql.QueryFlags, err error) {
 	defer trace.StartRegion(b.ctx, "ParseOnly").End()
 	b.nesting++
@@ -88,7 +75,15 @@ func (b *Builder) Parse(query string, qFlags *sql.QueryFlags, multi bool) (ret s
 	return outScope.node, parsed, remainder, b.qFlags, err
 }
 
-func (b *Builder) BindOnly(stmt ast.Statement, s string, queryFlags *sql.QueryFlags) (_ sql.Node, _ *sql.QueryFlags, err error) {
+func (b *Builder) BindOnly(stmt ast.Statement, s string, queryFlags *sql.QueryFlags) (sql.Node, *sql.QueryFlags, error) {
+	outScope, err := b.bindOnly(stmt, s, queryFlags)
+	if err != nil {
+		return nil, b.qFlags, err
+	}
+	return outScope.node, b.qFlags, err
+}
+
+func (b *Builder) bindOnly(stmt ast.Statement, s string, queryFlags *sql.QueryFlags) (_ *scope, err error) {
 	defer trace.StartRegion(b.ctx, "BindOnly").End()
 	defer func() {
 		if r := recover(); r != nil {
@@ -109,5 +104,5 @@ func (b *Builder) BindOnly(stmt ast.Statement, s string, queryFlags *sql.QueryFl
 		b.qFlags = queryFlags
 	}
 	outScope := b.build(nil, stmt, s)
-	return outScope.node, b.qFlags, err
+	return outScope, err
 }

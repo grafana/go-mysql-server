@@ -146,7 +146,8 @@ func TestSpatialQueriesPrepared(t *testing.T, harness Harness) {
 
 // TestJoinQueries tests join queries against a provided harness.
 func TestJoinQueries(t *testing.T, harness Harness) {
-	harness.Setup(setup.MydbData, setup.MytableData, setup.Pk_tablesData, setup.OthertableData, setup.NiltableData, setup.XyData, setup.FooData, setup.Comp_index_tablesData)
+	harness.Setup(setup.MydbData, setup.MytableData, setup.Pk_tablesData, setup.OthertableData, setup.NiltableData,
+		setup.XyData, setup.FooData, setup.Comp_index_tablesData, setup.EmptytableData)
 	e, err := harness.NewEngine(t)
 	require.NoError(t, err)
 
@@ -261,7 +262,8 @@ func TestQueriesPrepared(t *testing.T, harness Harness) {
 
 // TestJoinQueriesPrepared tests join queries as prepared statements against a provided harness.
 func TestJoinQueriesPrepared(t *testing.T, harness Harness) {
-	harness.Setup(setup.MydbData, setup.MytableData, setup.Pk_tablesData, setup.OthertableData, setup.NiltableData, setup.XyData, setup.FooData, setup.Comp_index_tablesData)
+	harness.Setup(setup.MydbData, setup.MytableData, setup.Pk_tablesData, setup.OthertableData, setup.NiltableData,
+		setup.XyData, setup.FooData, setup.Comp_index_tablesData, setup.EmptytableData)
 	for _, tt := range queries.JoinQueryTests {
 		if tt.Skip || tt.SkipPrepared {
 			continue
@@ -724,12 +726,12 @@ func TestQueryPlan(t *testing.T, harness Harness, e QueryEngine, tt queries.Quer
 		runTestWithDescribeOptions(t, tt.Query, tt.ExpectedPlan, sql.DescribeOptions{
 			Debug: true,
 		})
-		if tt.ExpectedEstimates != "" {
+		if tt.ExpectedEstimates != "" && tt.ExpectedEstimates != "skip" {
 			runTestWithDescribeOptions(t, tt.Query, tt.ExpectedEstimates, sql.DescribeOptions{
 				Estimates: true,
 			})
 		}
-		if tt.ExpectedAnalysis != "" {
+		if tt.ExpectedAnalysis != "" && tt.ExpectedAnalysis != "skip" {
 			runTestWithDescribeOptions(t, tt.Query, tt.ExpectedAnalysis, sql.DescribeOptions{
 				Estimates: true,
 				Analyze:   true,
@@ -741,7 +743,8 @@ func TestQueryPlan(t *testing.T, harness Harness, e QueryEngine, tt queries.Quer
 func TestQueryPlanWithName(t *testing.T, name string, harness Harness, e QueryEngine, query, expectedPlan string, options sql.DescribeOptions) {
 	t.Run(name, func(t *testing.T) {
 		ctx := NewContext(harness)
-		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, query)
+		builder := planbuilder.New(ctx, e.EngineAnalyzer().Catalog, nil)
+		parsed, _, _, qFlags, err := builder.Parse(query, nil, false)
 		require.NoError(t, err)
 
 		node, err := e.EngineAnalyzer().Analyze(ctx, parsed, nil, qFlags)
@@ -768,7 +771,8 @@ func TestQueryPlanWithName(t *testing.T, name string, harness Harness, e QueryEn
 func TestQueryPlanWithEngine(t *testing.T, harness Harness, e QueryEngine, tt queries.QueryPlanTest, verbose bool) {
 	t.Run(tt.Query, func(t *testing.T) {
 		ctx := NewContext(harness)
-		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, tt.Query)
+		builder := planbuilder.New(ctx, e.EngineAnalyzer().Catalog, nil)
+		parsed, _, _, qFlags, err := builder.Parse(tt.Query, nil, false)
 		require.NoError(t, err)
 
 		node, err := e.EngineAnalyzer().Analyze(ctx, parsed, nil, qFlags)
@@ -1482,6 +1486,7 @@ func TestTruncate(t *testing.T, harness Harness) {
 	e := mustNewEngine(t, harness)
 	defer e.Close()
 	ctx := NewContext(harness)
+	builder := planbuilder.New(ctx, e.EngineAnalyzer().Catalog, nil)
 
 	t.Run("Standard TRUNCATE", func(t *testing.T) {
 		RunQueryWithContext(t, e, harness, ctx, "CREATE TABLE t1 (pk BIGINT PRIMARY KEY, v1 BIGINT, INDEX(v1))")
@@ -1530,12 +1535,12 @@ func TestTruncate(t *testing.T, harness Harness) {
 		TestQueryWithContext(t, ctx, e, harness, "SELECT * FROM t5 ORDER BY 1", []sql.Row{{int64(1), int64(1)}, {int64(2), int64(2)}}, nil, nil, nil)
 
 		deleteStr := "DELETE FROM t5"
-		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, deleteStr)
+		parsed, _, _, qFlags, err := builder.Parse(deleteStr, nil, false)
 		require.NoError(t, err)
 		analyzed, err := e.EngineAnalyzer().Analyze(ctx, parsed, nil, qFlags)
 		require.NoError(t, err)
 		truncateFound := false
-		transform.Inspect(analyzed, func(n sql.Node) bool {
+		transform.InspectWithOpaque(analyzed, func(n sql.Node) bool {
 			switch n.(type) {
 			case *plan.Truncate:
 				truncateFound = true
@@ -1559,12 +1564,13 @@ func TestTruncate(t *testing.T, harness Harness) {
 		RunQueryWithContext(t, e, harness, ctx, "INSERT INTO t6parent VALUES (1,1), (2,2)")
 		RunQueryWithContext(t, e, harness, ctx, "INSERT INTO t6child VALUES (1,1), (2,2)")
 
-		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, "DELETE FROM t6parent")
+		deleteStr := "DELETE FROM t6parent"
+		parsed, _, _, qFlags, err := builder.Parse(deleteStr, nil, false)
 		require.NoError(t, err)
 		analyzed, err := e.EngineAnalyzer().Analyze(ctx, parsed, nil, qFlags)
 		require.NoError(t, err)
 		truncateFound := false
-		transform.Inspect(analyzed, func(n sql.Node) bool {
+		transform.InspectWithOpaque(analyzed, func(n sql.Node) bool {
 			switch n.(type) {
 			case *plan.Truncate:
 				truncateFound = true
@@ -1587,12 +1593,12 @@ func TestTruncate(t *testing.T, harness Harness) {
 		TestQueryWithContext(t, ctx, e, harness, "SELECT * FROM t7i ORDER BY 1", []sql.Row{{int64(3), int64(3)}}, nil, nil, nil)
 
 		deleteStr := "DELETE FROM t7"
-		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, deleteStr)
+		parsed, _, _, qFlags, err := builder.Parse(deleteStr, nil, false)
 		require.NoError(t, err)
 		analyzed, err := e.EngineAnalyzer().Analyze(ctx, parsed, nil, qFlags)
 		require.NoError(t, err)
 		truncateFound := false
-		transform.Inspect(analyzed, func(n sql.Node) bool {
+		transform.InspectWithOpaque(analyzed, func(n sql.Node) bool {
 			switch n.(type) {
 			case *plan.Truncate:
 				truncateFound = true
@@ -1615,12 +1621,12 @@ func TestTruncate(t *testing.T, harness Harness) {
 		TestQueryWithContext(t, ctx, e, harness, "SELECT * FROM t8 ORDER BY 1", []sql.Row{{int64(1), int64(4)}, {int64(2), int64(5)}}, nil, nil, nil)
 
 		deleteStr := "DELETE FROM t8"
-		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, deleteStr)
+		parsed, _, _, qFlags, err := builder.Parse(deleteStr, nil, false)
 		require.NoError(t, err)
 		analyzed, err := e.EngineAnalyzer().Analyze(ctx, parsed, nil, qFlags)
 		require.NoError(t, err)
 		truncateFound := false
-		transform.Inspect(analyzed, func(n sql.Node) bool {
+		transform.InspectWithOpaque(analyzed, func(n sql.Node) bool {
 			switch n.(type) {
 			case *plan.Truncate:
 				truncateFound = true
@@ -1644,12 +1650,12 @@ func TestTruncate(t *testing.T, harness Harness) {
 		TestQueryWithContext(t, ctx, e, harness, "SELECT * FROM t9 ORDER BY 1", []sql.Row{{int64(7), int64(7)}, {int64(8), int64(8)}}, nil, nil, nil)
 
 		deleteStr := "DELETE FROM t9 WHERE pk > 0"
-		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, deleteStr)
+		parsed, _, _, qFlags, err := builder.Parse(deleteStr, nil, false)
 		require.NoError(t, err)
 		analyzed, err := e.EngineAnalyzer().Analyze(ctx, parsed, nil, qFlags)
 		require.NoError(t, err)
 		truncateFound := false
-		transform.Inspect(analyzed, func(n sql.Node) bool {
+		transform.InspectWithOpaque(analyzed, func(n sql.Node) bool {
 			switch n.(type) {
 			case *plan.Truncate:
 				truncateFound = true
@@ -1671,12 +1677,12 @@ func TestTruncate(t *testing.T, harness Harness) {
 		TestQueryWithContext(t, ctx, e, harness, "SELECT * FROM t10 ORDER BY 1", []sql.Row{{int64(8), int64(8)}, {int64(9), int64(9)}}, nil, nil, nil)
 
 		deleteStr := "DELETE FROM t10 LIMIT 1000"
-		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, deleteStr)
+		parsed, _, _, qFlags, err := builder.Parse(deleteStr, nil, false)
 		require.NoError(t, err)
 		analyzed, err := e.EngineAnalyzer().Analyze(ctx, parsed, nil, qFlags)
 		require.NoError(t, err)
 		truncateFound := false
-		transform.Inspect(analyzed, func(n sql.Node) bool {
+		transform.InspectWithOpaque(analyzed, func(n sql.Node) bool {
 			switch n.(type) {
 			case *plan.Truncate:
 				truncateFound = true
@@ -1698,12 +1704,12 @@ func TestTruncate(t *testing.T, harness Harness) {
 		TestQueryWithContext(t, ctx, e, harness, "SELECT * FROM t11 ORDER BY 1", []sql.Row{{int64(1), int64(1)}, {int64(9), int64(9)}}, nil, nil, nil)
 
 		deleteStr := "DELETE FROM t11 ORDER BY 1"
-		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, deleteStr)
+		parsed, _, _, qFlags, err := builder.Parse(deleteStr, nil, false)
 		require.NoError(t, err)
 		analyzed, err := e.EngineAnalyzer().Analyze(ctx, parsed, nil, qFlags)
 		require.NoError(t, err)
 		truncateFound := false
-		transform.Inspect(analyzed, func(n sql.Node) bool {
+		transform.InspectWithOpaque(analyzed, func(n sql.Node) bool {
 			switch n.(type) {
 			case *plan.Truncate:
 				truncateFound = true
@@ -1729,12 +1735,12 @@ func TestTruncate(t *testing.T, harness Harness) {
 		TestQueryWithContext(t, ctx, e, harness, "SELECT * FROM t12b ORDER BY 1", []sql.Row{{int64(1), int64(1)}, {int64(2), int64(2)}}, nil, nil, nil)
 
 		deleteStr := "DELETE t12a, t12b FROM t12a INNER JOIN t12b WHERE t12a.pk=t12b.pk"
-		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, deleteStr)
+		parsed, _, _, qFlags, err := builder.Parse(deleteStr, nil, false)
 		require.NoError(t, err)
 		analyzed, err := e.EngineAnalyzer().Analyze(ctx, parsed, nil, qFlags)
 		require.NoError(t, err)
 		truncateFound := false
-		transform.Inspect(analyzed, func(n sql.Node) bool {
+		transform.InspectWithOpaque(analyzed, func(n sql.Node) bool {
 			switch n.(type) {
 			case *plan.Truncate:
 				truncateFound = true
@@ -1956,7 +1962,7 @@ func TestUserPrivileges(t *testing.T, harness ClientHarness) {
 			defer engine.Close()
 
 			ctx := NewContext(harness)
-			ctx.NewCtxWithClient(sql.Client{
+			ctx.WithClient(sql.Client{
 				User:    "root",
 				Address: "localhost",
 			})
@@ -2055,7 +2061,7 @@ func TestUserPrivileges(t *testing.T, harness ClientHarness) {
 					t.Skipf("Skipping query %s", lastQuery)
 				}
 			}
-			ctx := rootCtx.NewCtxWithClient(sql.Client{
+			ctx := rootCtx.WithClient(sql.Client{
 				User:    "tester",
 				Address: "localhost",
 			})
@@ -4902,10 +4908,6 @@ func TestSessionSelectLimit(t *testing.T, harness Harness) {
 			Expected: []sql.Row{{1}, {2}, {3}},
 		},
 		{
-			Query:    "SELECT i FROM (SELECT i FROM mytable ORDER BY i DESC) t ORDER BY i LIMIT 3",
-			Expected: []sql.Row{{1}, {2}, {3}},
-		},
-		{
 			Query:    "select count(*), y from a group by y;",
 			Expected: []sql.Row{{2, 1}, {3, 2}},
 		},
@@ -4972,7 +4974,6 @@ func TestTracing(t *testing.T, harness Harness) {
 
 	spans := tracer.Spans
 	var expectedSpans = []string{
-		"plan.Limit", // why Limit if there's already TopN?
 		"plan.TopN",
 		"plan.Distinct",
 		"plan.Project",
