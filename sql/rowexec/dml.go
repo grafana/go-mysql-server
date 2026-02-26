@@ -136,7 +136,7 @@ func (b *BaseBuilder) buildDeleteFrom(ctx *sql.Context, n *plan.DeleteFrom, row 
 		// By default the sourceName in the schema is the table name, but if there is a
 		// table alias applied, then use that instead.
 		sourceName := deletable.Name()
-		transform.Inspect(target, func(node sql.Node) bool {
+		transform.InspectWithOpaque(target, func(node sql.Node) bool {
 			if tableAlias, ok := node.(*plan.TableAlias); ok {
 				sourceName = tableAlias.Name()
 				return false
@@ -200,6 +200,13 @@ func (b *BaseBuilder) buildDropTable(ctx *sql.Context, n *plan.DropTable, _ sql.
 	var err error
 	var curdb sql.Database
 
+	if b.EngineOverrides.Hooks.DropTable.PreSQLExecution != nil {
+		nn, err := b.EngineOverrides.Hooks.DropTable.PreSQLExecution(ctx, b.Runner, n)
+		if err != nil {
+			return nil, err
+		}
+		n = nn.(*plan.DropTable)
+	}
 	sortedTables, err := sortTablesByFKDependencies(ctx, n.Tables)
 	if err != nil {
 		return nil, err
@@ -263,6 +270,12 @@ func (b *BaseBuilder) buildDropTable(ctx *sql.Context, n *plan.DropTable, _ sql.
 			if err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	if b.EngineOverrides.Hooks.DropTable.PostSQLExecution != nil {
+		if err = b.EngineOverrides.Hooks.DropTable.PostSQLExecution(ctx, b.Runner, n); err != nil {
+			return nil, err
 		}
 	}
 

@@ -154,7 +154,7 @@ func writePlanString(w *bytes.Buffer, planString string) {
 }
 
 func analyzeQuery(ctx *sql.Context, engine enginetest.QueryEngine, query string) sql.Node {
-	binder := planbuilder.New(ctx, engine.EngineAnalyzer().Catalog, engine.EngineEventScheduler(), nil)
+	binder := planbuilder.New(ctx, engine.EngineAnalyzer().Catalog, engine.EngineEventScheduler())
 	parsed, _, _, qFlags, err := binder.Parse(query, nil, false)
 	if err != nil {
 		exit(fmt.Errorf("%w\nfailed to parse query: %s", err, query))
@@ -167,7 +167,7 @@ func analyzeQuery(ctx *sql.Context, engine enginetest.QueryEngine, query string)
 }
 
 func generatePlansForSuite(spec PlanSpec, w *bytes.Buffer) error {
-	harness := enginetest.NewMemoryHarness("default", 1, 1, true, nil)
+	harness := enginetest.NewMemoryHarness("default", 1, nil)
 	s := specSetup(spec.Name)
 	harness.Setup(s...)
 	engine, err := harness.NewEngine(nil)
@@ -208,24 +208,34 @@ func generatePlansForSuite(spec PlanSpec, w *bytes.Buffer) error {
 			writePlanString(w, planString)
 
 			if node.IsReadOnly() {
-				_, _ = w.WriteString(`ExpectedEstimates: `)
-				planString = sql.Describe(enginetest.ExtractQueryNode(node), sql.DescribeOptions{
-					Estimates: true,
-				})
-				writePlanString(w, planString)
-				err = enginetest.ExecuteNode(ctx, engine, node)
-				if err != nil {
-					exit(fmt.Errorf("%w\nfailed to execute query: %s", err, tt.Query))
+				var planString string
+				if tt.ExpectedEstimates != "skip" {
+					_, _ = w.WriteString(`ExpectedEstimates: `)
+					planString = sql.Describe(enginetest.ExtractQueryNode(node), sql.DescribeOptions{
+						Estimates: true,
+					})
+					writePlanString(w, planString)
+				} else {
+					_, _ = w.WriteString("ExpectedEstimates: \"skip\",\n")
 				}
-				_, _ = w.WriteString(`ExpectedAnalysis: `)
-				planString = sql.Describe(enginetest.ExtractQueryNode(node), sql.DescribeOptions{
-					Analyze:   true,
-					Estimates: true,
-				})
-				writePlanString(w, planString)
+
+				if tt.ExpectedAnalysis != "skip" {
+					_, _ = w.WriteString(`ExpectedAnalysis: `)
+					err = enginetest.ExecuteNode(ctx, engine, node)
+					if err != nil {
+						exit(fmt.Errorf("%w\nfailed to execute query: %s", err, tt.Query))
+					}
+					planString = sql.Describe(enginetest.ExtractQueryNode(node), sql.DescribeOptions{
+						Analyze:   true,
+						Estimates: true,
+					})
+					writePlanString(w, planString)
+				} else {
+					_, _ = w.WriteString("ExpectedAnalysis: \"skip\",\n")
+				}
 			}
 		} else {
-			_, _ = w.WriteString(`Skip: true,\n`)
+			_, _ = w.WriteString("Skip: true,\n")
 		}
 
 		_, _ = w.WriteString("\t},\n")
@@ -236,7 +246,7 @@ func generatePlansForSuite(spec PlanSpec, w *bytes.Buffer) error {
 }
 
 func generatePlansForScriptSuite(spec PlanSpec, w *bytes.Buffer) error {
-	harness := enginetest.NewMemoryHarness("default", 1, 1, true, nil)
+	harness := enginetest.NewMemoryHarness("default", 1, nil)
 	harness.Setup(setup.MydbData)
 	_, _ = fmt.Fprintf(w, "var %s = []ScriptTest{\n", spec.Name)
 	for _, tt := range queries.QueryPlanScriptTests {
@@ -247,7 +257,7 @@ func generatePlansForScriptSuite(spec PlanSpec, w *bytes.Buffer) error {
 		w.WriteString(fmt.Sprintf("\t\tName: \"%s\",\n", tt.Name))
 		w.WriteString("\t\tSetUpScript: []string{\n")
 		for _, setupQuery := range tt.SetUpScript {
-			w.WriteString(fmt.Sprintf("\t\t\t\"%s\",\n", setupQuery))
+			w.WriteString(fmt.Sprintf("\t\t\t`%s`,\n", setupQuery))
 		}
 		w.WriteString("\t\t},\n")
 		w.WriteString("\t\tAssertions: []ScriptTestAssertion{\n")
@@ -256,7 +266,7 @@ func generatePlansForScriptSuite(spec PlanSpec, w *bytes.Buffer) error {
 			if assertion.Skip {
 				w.WriteString("\t\t\t\tSkip: true,\n")
 			}
-			w.WriteString(fmt.Sprintf("\t\t\t\tQuery: \"%s\",\n", assertion.Query))
+			w.WriteString(fmt.Sprintf("\t\t\t\tQuery: `%s`,\n", assertion.Query))
 			w.WriteString(fmt.Sprintf("\t\t\t\tExpected: []sql.Row{\n"))
 			for _, expRow := range assertion.Expected {
 				w.WriteString(fmt.Sprintf("\t\t\t\t\t%#v,\n", expRow))
@@ -359,7 +369,7 @@ func usage() {
 
 	fmt.Fprintf(os.Stderr, "\tplangen [flags] spec\n\n")
 
-	//fmt.Fprintf(os.Stderr, "Flags:\n")
+	// fmt.Fprintf(os.Stderr, "Flags:\n")
 
 	flag.PrintDefaults()
 

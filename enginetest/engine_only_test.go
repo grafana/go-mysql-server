@@ -77,7 +77,7 @@ func TestWarnings(t *testing.T) {
 		enginetest.TestWarnings(t, harness)
 	})
 
-	harness = enginetest.NewMemoryHarness("parallel", 2, testNumPartitions, false, nil)
+	harness = enginetest.NewMemoryHarness("parallel", testNumPartitions, nil)
 	t.Run("parallel", func(t *testing.T) {
 		enginetest.TestWarnings(t, harness)
 	})
@@ -272,7 +272,7 @@ func TestShowProcessList(t *testing.T) {
 
 	n := plan.NewShowProcessList()
 
-	iter, err := rowexec.DefaultBuilder.Build(ctx, n, nil)
+	iter, err := rowexec.NewBuilder(nil, sql.EngineOverrides{}).Build(ctx, n, nil)
 	require.NoError(err)
 	rows, err := sql.RowIterToRows(ctx, iter)
 	require.NoError(err)
@@ -327,9 +327,9 @@ func TestLockTables(t *testing.T) {
 		{plan.NewResolvedTable(t1, nil, nil), true},
 		{plan.NewResolvedTable(t2, nil, nil), false},
 	})
-	node.Catalog = analyzer.NewCatalog(sql.NewDatabaseProvider())
+	node.Catalog = analyzer.NewCatalog(sql.NewDatabaseProvider(), sql.EngineOverrides{})
 
-	_, err := rowexec.DefaultBuilder.Build(sql.NewEmptyContext(), node, nil)
+	_, err := rowexec.NewBuilder(nil, sql.EngineOverrides{}).Build(sql.NewEmptyContext(), node, nil)
 
 	require.NoError(err)
 
@@ -350,17 +350,14 @@ func TestUnlockTables(t *testing.T) {
 	db.AddTable("bar", t2)
 	db.AddTable("baz", t3)
 
-	catalog := analyzer.NewCatalog(sql.NewDatabaseProvider(db))
+	catalog := analyzer.NewCatalog(sql.NewDatabaseProvider(db), sql.EngineOverrides{})
 
-	ctx := sql.NewContext(context.Background())
+	ctx := sql.NewEmptyContext()
 	ctx.SetCurrentDatabase("db")
 	catalog.LockTable(ctx, "foo")
 	catalog.LockTable(ctx, "bar")
 
-	node := plan.NewUnlockTables()
-	node.Catalog = catalog
-
-	_, err := node.RowIter(ctx, nil)
+	err := catalog.UnlockTables(ctx, ctx.ID())
 	require.NoError(err)
 
 	require.Equal(1, t1.unlocks)
@@ -441,7 +438,7 @@ func TestAnalyzer_Exp(t *testing.T) {
 			require.NoError(t, err)
 
 			ctx := enginetest.NewContext(harness)
-			b := planbuilder.New(ctx, e.EngineAnalyzer().Catalog, e.EngineEventScheduler(), nil)
+			b := planbuilder.New(ctx, e.EngineAnalyzer().Catalog, e.EngineEventScheduler())
 			parsed, _, _, _, err := b.Parse(tt.query, nil, false)
 			require.NoError(t, err)
 
@@ -566,7 +563,7 @@ func TestShowCharset(t *testing.T) {
 		},
 	}
 
-	harness := enginetest.NewMemoryHarness("", 1, 1, false, nil)
+	harness := enginetest.NewMemoryHarness("", 1, nil)
 	for _, test := range tests {
 		enginetest.TestQuery(t, harness, test.Query, test.RowGen(t), nil, nil)
 	}
@@ -585,6 +582,7 @@ func TestTableFunctions(t *testing.T) {
 		&databaseProvider,
 		SimpleTableFunction{},
 		memory.IntSequenceTable{},
+		memory.LookupSequenceTable{},
 		memory.PointLookupTable{},
 		memory.TableFunc{},
 		memory.ExponentialDistTable{},
@@ -593,7 +591,8 @@ func TestTableFunctions(t *testing.T) {
 	engine := enginetest.NewEngineWithProvider(t, harness, testDatabaseProvider)
 	harness = harness.WithProvider(engine.Analyzer.Catalog.DbProvider)
 
-	engine.EngineAnalyzer().ExecBuilder = rowexec.DefaultBuilder
+	engine.EngineAnalyzer().ExecBuilder = rowexec.NewBuilder(nil, sql.EngineOverrides{})
+	engine.EngineAnalyzer().ExecBuilder.Runner = engine
 
 	engine, err := enginetest.RunSetupScripts(harness.NewContext(), engine, setup.MydbData, true)
 	require.NoError(t, err)
@@ -649,7 +648,9 @@ func TestTriggerViewWarning(t *testing.T) {
 
 	baseDb := db.(*memory.HistoryDatabase).BaseDatabase
 	err = baseDb.CreateTrigger(nil, sql.TriggerDefinition{
-		Name:            "view_trig",
+		Name: "view_trig",
+		// TODO: this trigger statement still wouldn't parse correctly in MySQL if it was created on a table. Update to
+		// a trigger that would otherwise be valid.
 		CreateStatement: "CREATE TRIGGER view_trig BEFORE INSERT ON myview FOR EACH ROW SET i=i+2",
 	})
 	assert.NoError(t, err)
@@ -659,7 +660,8 @@ func TestTriggerViewWarning(t *testing.T) {
 	enginetest.CreateNewConnectionForServerEngine(ctx, e)
 
 	enginetest.TestQueryWithContext(t, ctx, e, harness, "insert into mytable values (4, 'fourth row')", []sql.Row{{types.NewOkResult(1)}}, nil, nil, nil)
-	enginetest.TestQueryWithContext(t, ctx, e, harness, "SHOW WARNINGS", []sql.Row{{"Warning", 0, "trigger on view is not supported; 'DROP TRIGGER  view_trig' to fix"}}, nil, nil, nil)
+	enginetest.TestQueryWithContext(t, ctx, e, harness, "SHOW WARNINGS", []sql.Row{{"Warning", 0, "Trigger on view is not supported. Please run 'DROP TRIGGER view_trig;'"}}, nil, nil, nil)
+	// TODO: this is not correct. MySQL allows inserting into views. https://github.com/dolthub/dolt/issues/10292
 	enginetest.AssertErrWithCtx(t, e, harness, ctx, "insert into myview values (5, 'fifth row')", nil, nil, "expected insert destination to be resolved or unresolved table")
 }
 

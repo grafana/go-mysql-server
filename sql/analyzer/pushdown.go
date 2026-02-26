@@ -37,7 +37,7 @@ func pushFilters(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scope, s
 	}
 
 	pushdownAboveTables := func(n sql.Node, filters *filterSet) (sql.Node, transform.TreeIdentity, error) {
-		return transform.NodeWithCtx(n, filterPushdownChildSelector, func(c transform.Context) (sql.Node, transform.TreeIdentity, error) {
+		return transform.NodeWithCtx(n, filterPushdownSelector, func(c transform.Context) (sql.Node, transform.TreeIdentity, error) {
 			switch node := c.Node.(type) {
 			case *plan.Filter:
 				// Notably, filters are allowed to be pushed through other filters.
@@ -82,8 +82,7 @@ func pushFilters(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scope, s
 			}
 			// Find all col exprs and group them by the table they mention so that we can keep track of which ones
 			// have been pushed down and need to be removed from the parent filter
-			filtersByTable := getFiltersByTable(n)
-			filters := newFilterSet(n.Expression, filtersByTable, tableAliases)
+			filters := newFilterSet(n, scope, tableAliases)
 
 			// move filter predicates directly above their respective tables in joins
 			ret, same, err := pushdownAboveTables(n, filters)
@@ -157,40 +156,30 @@ func canDoPushdown(n sql.Node) bool {
 	return true
 }
 
-// Pushing down a filter is incompatible with the secondary table in a Left or Right join. If we push a predicate on the
-// secondary table below the join, we end up not evaluating it in all cases (since the secondary table result is
-// sometimes null in these types of joins). It must be evaluated only after the join result is computed. This is also
-// true with both tables in a Full Outer join, since either table result could be null.
-func filterPushdownChildSelector(c transform.Context) bool {
-	switch c.Node.(type) {
-	case *plan.Limit:
-		return false
-	}
-
+// filterPushdownSelector determines if it's valid to push a filter down into a node
+func filterPushdownSelector(c transform.Context) bool {
 	switch n := c.Parent.(type) {
 	case *plan.TableAlias:
 		return false
-	case *plan.Window:
-		// Windows operate across the rows they see and cannot have
-		// filters pushed below them. Instead, the step will be run
-		// again by the Transform function, starting at this node.
+	case *plan.JoinNode:
+		// Pushing down a filter is incompatible with the secondary table in a Left or Right join. If we push a
+		// predicate on the secondary table below the join, we end up not evaluating it in all cases (since the
+		// secondary table result is sometimes null in these types of joins). It must be evaluated only after the join
+		// result is computed.
+		if n.Op.IsLeftOuter() && c.ChildNum != 0 {
+			return false
+		}
+	}
+
+	switch n := c.Node.(type) {
+	case *plan.Limit, *plan.Window:
+		// Limit and Window operate across the rows they see and cannot have filters pushed below them.
 		return false
 	case *plan.JoinNode:
-		switch {
-		case n.Op.IsFullOuter():
-			return false
-		case n.Op.IsMerge():
-			return false
-		case n.Op.IsLookup():
-			if n.JoinType().IsLeftOuter() {
-				return c.ChildNum == 0
-			}
-			return true
-		case n.Op.IsLeftOuter():
-			return c.ChildNum == 0
-		default:
-		}
-	default:
+		// Filters cannot be pushed down into FullOuter joins because it is not null-safe and must be evaluated
+		// after join result is computed. Filters cannot be pushed down into Merge join because they might result into
+		// an index lookup that is not monotonically sorted on the join condition
+		return !(n.Op.IsFullOuter() || n.Op.IsMerge())
 	}
 	return true
 }
@@ -199,7 +188,7 @@ func transformPushdownSubqueryAliasFilters(ctx *sql.Context, a *Analyzer, n sql.
 	var filters *filterSet
 
 	transformFilterNode := func(n *plan.Filter) (sql.Node, transform.TreeIdentity, error) {
-		return transform.NodeWithCtx(n, filterPushdownChildSelector, func(c transform.Context) (sql.Node, transform.TreeIdentity, error) {
+		return transform.NodeWithCtx(n, filterPushdownSelector, func(c transform.Context) (sql.Node, transform.TreeIdentity, error) {
 			switch node := c.Node.(type) {
 			case *plan.Filter:
 				newF := updateFilterNode(ctx, a, node, filters)
@@ -208,6 +197,13 @@ func transformPushdownSubqueryAliasFilters(ctx *sql.Context, a *Analyzer, n sql.
 				}
 				return newF, transform.NewTree, nil
 			case *plan.SubqueryAlias:
+				// TODO: We probably could push filters into a RecursiveCTE to get an IndexedTableAccess where
+				//  applicable. But we currently don't push any filters through at all so pushing filters past the
+				//  SubqueryAlias node doesn't actually do anything except possibly make them uncacheable, which we
+				//  don't want.
+				if _, ok := node.Child.(*plan.RecursiveCte); ok {
+					return node, transform.SameTree, nil
+				}
 				return pushdownFiltersUnderSubqueryAlias(ctx, a, node, filters)
 			default:
 				return node, transform.SameTree, nil
@@ -220,8 +216,8 @@ func transformPushdownSubqueryAliasFilters(ctx *sql.Context, a *Analyzer, n sql.
 		switch n := n.(type) {
 		case *plan.Filter:
 			// First step is to find all col exprs and group them by the table they mention.
-			filtersByTable := getFiltersByTable(n)
-			filters = newFilterSet(n.Expression, filtersByTable, tableAliases)
+
+			filters = newFilterSet(n, scope, tableAliases)
 			return transformFilterNode(n)
 		default:
 			return n, transform.SameTree, nil
@@ -246,6 +242,18 @@ func pushdownFiltersToAboveTable(
 	var pushedDownFilterExpression sql.Expression
 	if tableFilters := filters.availableFiltersForTable(ctx, tableNode.Name()); len(tableFilters) > 0 {
 		filters.markFiltersHandled(tableFilters...)
+		for i, filter := range tableFilters {
+			// If a filter contains a reference to a projection alias, pushing the filter will move it below the
+			// Project node. We need to replace the reference with the underlying expression.
+			tableFilters[i], _, _ = transform.Expr(filter, func(e sql.Expression) (sql.Expression, transform.TreeIdentity, error) {
+				if gt, ok := e.(*expression.GetField); ok {
+					if aliasedExpression, ok := filters.projectionExpressions[gt.Id()]; ok {
+						return aliasedExpression, transform.NewTree, nil
+					}
+				}
+				return e, transform.SameTree, nil
+			})
+		}
 		pushedDownFilterExpression = expression.JoinAnd(tableFilters...)
 
 		a.Log(
@@ -289,16 +297,29 @@ func pushdownFiltersUnderSubqueryAlias(ctx *sql.Context, a *Analyzer, sa *plan.S
 	expressionsForChild := make([]sql.Expression, len(handled))
 	var err error
 	for i, h := range handled {
-		expressionsForChild[i], _, err = transform.Expr(h, func(e sql.Expression) (sql.Expression, transform.TreeIdentity, error) {
+		var tf transform.ExprFunc
+		tf = func(e sql.Expression) (sql.Expression, transform.TreeIdentity, error) {
+			// If a filter contains a reference to a projection alias, pushing the filter will move it below the
+			// Project node. We need to replace the reference with the underlying expression.
 			if gt, ok := e.(*expression.GetField); ok {
+				if aliasedExpression, ok := filters.projectionExpressions[gt.Id()]; ok {
+					return transform.Expr(aliasedExpression, tf)
+				}
 				gf, ok := sa.ScopeMapping[gt.Id()]
 				if !ok {
-					return e, transform.SameTree, fmt.Errorf("unable to find child with id: %d", gt.Index())
+					// The GetField must be referencing an outer or lateral scope.
+					// We need to add this to the subquery alias's list of correlated columns
+					sa.Correlated.Add(gt.Id())
+					// There now may be a reference to a lateral scope, so we mark the alias as lateral just in case.
+					// This shouldn't break anything, but it might inhibit optimizations that check this.
+					sa.IsLateral = true
+					return e, transform.NewTree, nil
 				}
 				return gf, transform.NewTree, nil
 			}
 			return e, transform.SameTree, nil
-		})
+		}
+		expressionsForChild[i], _, err = transform.Expr(h, tf)
 		if err != nil {
 			return sa, transform.SameTree, err
 		}

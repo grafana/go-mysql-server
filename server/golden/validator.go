@@ -29,6 +29,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/dolthub/go-mysql-server/errguard"
 	"github.com/dolthub/go-mysql-server/sql"
 )
 
@@ -91,6 +92,10 @@ func (v Validator) ConnectionClosed(c *mysql.Conn) {
 	v.golden.ConnectionClosed(c)
 }
 
+func (v Validator) ConnectionAuthenticated(c *mysql.Conn) error {
+	return nil
+}
+
 func (v Validator) ConnectionAborted(c *mysql.Conn, reason string) error {
 	return nil
 }
@@ -104,11 +109,11 @@ func (v Validator) ComMultiQuery(
 	ag := newResultAggregator(callback)
 	var remainder string
 	eg, _ := errgroup.WithContext(context.Background())
-	eg.Go(func() (err error) {
+	errguard.Go(eg, func() (err error) {
 		remainder, err = v.handler.ComMultiQuery(ctx, c, query, ag.processResults)
 		return
 	})
-	eg.Go(func() error {
+	errguard.Go(eg, func() error {
 		// ignore errors from MySQL connection
 		_, _ = v.golden.ComMultiQuery(ctx, c, query, ag.processGoldenResults)
 		return nil
@@ -132,10 +137,10 @@ func (v Validator) ComQuery(
 ) error {
 	ag := newResultAggregator(callback)
 	eg, _ := errgroup.WithContext(context.Background())
-	eg.Go(func() error {
+	errguard.Go(eg, func() error {
 		return v.handler.ComQuery(ctx, c, query, ag.processResults)
 	})
-	eg.Go(func() error {
+	errguard.Go(eg, func() error {
 		// ignore errors from MySQL connection
 		_ = v.golden.ComQuery(ctx, c, query, ag.processGoldenResults)
 		return nil

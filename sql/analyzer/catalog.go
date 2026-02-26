@@ -34,6 +34,8 @@ type Catalog struct {
 	DbProvider    sql.DatabaseProvider
 	AuthHandler   sql.AuthorizationHandler
 
+	// BinlogConsumer holds an optional consumer that processes binlog events (e.g. for BINLOG statements).
+	BinlogConsumer binlogreplication.BinlogConsumer
 	// BinlogReplicaController holds an optional controller that receives forwarded binlog
 	// replication messages (e.g. "start replica").
 	BinlogReplicaController binlogreplication.BinlogReplicaController
@@ -43,6 +45,7 @@ type Catalog struct {
 
 	MySQLDb          *mysql_db.MySQLDb
 	builtInFunctions function.Registry
+	overrides        sql.EngineOverrides
 
 	locks sessionLocks
 	mu    sync.RWMutex
@@ -53,8 +56,9 @@ func (c *Catalog) DropDbStats(ctx *sql.Context, db string, flush bool) error {
 }
 
 var _ sql.Catalog = (*Catalog)(nil)
-var _ binlogreplication.BinlogReplicaCatalog = (*Catalog)(nil)
-var _ binlogreplication.BinlogPrimaryCatalog = (*Catalog)(nil)
+var _ binlogreplication.BinlogConsumerProvider = (*Catalog)(nil)
+var _ binlogreplication.BinlogReplicaProvider = (*Catalog)(nil)
+var _ binlogreplication.BinlogPrimaryProvider = (*Catalog)(nil)
 
 type tableLocks map[string]struct{}
 
@@ -63,17 +67,26 @@ type dbLocks map[string]tableLocks
 type sessionLocks map[uint32]dbLocks
 
 // NewCatalog returns a new empty Catalog with the given provider
-func NewCatalog(provider sql.DatabaseProvider) *Catalog {
+func NewCatalog(provider sql.DatabaseProvider, overrides sql.EngineOverrides) *Catalog {
 	c := &Catalog{
 		MySQLDb:          mysql_db.CreateEmptyMySQLDb(),
 		InfoSchema:       information_schema.NewInformationSchemaDatabase(),
 		DbProvider:       provider,
 		builtInFunctions: function.NewRegistry(),
+		overrides:        overrides,
 		StatsProvider:    memory.NewStatsProv(),
 		locks:            make(sessionLocks),
 	}
 	c.AuthHandler = sql.GetAuthorizationHandlerFactory().CreateHandler(c)
 	return c
+}
+
+func (c *Catalog) HasBinlogConsumer() bool {
+	return c.BinlogConsumer != nil
+}
+
+func (c *Catalog) GetBinlogConsumer() binlogreplication.BinlogConsumer {
+	return c.BinlogConsumer
 }
 
 func (c *Catalog) HasBinlogReplicaController() bool {
@@ -402,6 +415,11 @@ func (c *Catalog) TableFunction(ctx *sql.Context, name string) (sql.TableFunctio
 		}
 	}
 	return nil, false
+}
+
+// Overrides implements the sql.Catalog interface
+func (c *Catalog) Overrides() sql.EngineOverrides {
+	return c.overrides
 }
 
 func (c *Catalog) AnalyzeTable(ctx *sql.Context, table sql.Table, db string) error {

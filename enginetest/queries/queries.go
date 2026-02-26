@@ -5031,6 +5031,8 @@ SELECT * FROM cte WHERE  d = 2;`,
 			{"gtid_next", "AUTOMATIC"},
 			{"gtid_owned", ""},
 			{"gtid_purged", ""},
+			{"gtid_domain_id", 0},
+			{"gtid_seq_no", 0},
 		},
 	},
 	{
@@ -8177,6 +8179,12 @@ ORDER BY 1;`,
 		},
 	},
 	{
+		Query: "SELECT * FROM xy JOIN LATERAL (SELECT * FROM uv WHERE xy.x+1 = uv.u) uv2",
+		Expected: []sql.Row{
+			{0, 2, 1, 1}, {1, 0, 2, 2}, {2, 1, 3, 2},
+		},
+	},
+	{
 		Query: `
 select * from mytable,
 	lateral (
@@ -8342,13 +8350,6 @@ from typestable`,
 				nil,
 				nil,
 			},
-		},
-	},
-	{
-		// TODO: This goes past MySQL's range
-		Query: "select dayname('0000-00-00')",
-		Expected: []sql.Row{
-			{"Saturday"},
 		},
 	},
 	{
@@ -9822,6 +9823,10 @@ var ErrorQueries = []QueryErrorTest{
 		// Test for: https://github.com/dolthub/dolt/issues/3247
 		Query:       "select * from dual where foo() and true;",
 		ExpectedErr: sql.ErrFunctionNotFound,
+	},
+	{
+		Query:       "select normal_dist();",
+		ExpectedErr: sql.ErrTableFunctionNotInFrom,
 	},
 	{
 		Query:       "select * from mytable where (i = 1, i = 0 or i = 2) and (i > -1)",

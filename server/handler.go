@@ -17,12 +17,10 @@ package server
 import (
 	"context"
 	"encoding/base64"
-	goerrors "errors"
 	"fmt"
 	"io"
 	"net"
 	"regexp"
-	"runtime/debug"
 	"runtime/trace"
 	"sync"
 	"time"
@@ -38,6 +36,7 @@ import (
 	"gopkg.in/src-d/go-errors.v1"
 
 	sqle "github.com/dolthub/go-mysql-server"
+	"github.com/dolthub/go-mysql-server/errguard"
 	"github.com/dolthub/go-mysql-server/internal/sockstate"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/analyzer"
@@ -102,6 +101,19 @@ func (h *Handler) NewConnection(c *mysql.Conn) {
 func (h *Handler) ConnectionAborted(_ *mysql.Conn, _ string) error {
 	sql.StatusVariables.IncrementGlobal("Aborted_connects", 1)
 	return nil
+}
+
+// Called when a new connection successfully
+// authenticated. Responsible for creating the session associated with
+// the connection in the session manager and updating processlist with
+// the authenticated user and remote address.
+func (h *Handler) ConnectionAuthenticated(c *mysql.Conn) error {
+	err := h.sm.ConnReady(context.Background(), c)
+	if err != nil {
+		logrus.Errorf("unable to register new authenticated connection: %s", err.Error())
+		err = sql.CastSQLError(err)
+	}
+	return err
 }
 
 func (h *Handler) ComInitDB(c *mysql.Conn, schemaName string) error {
@@ -374,7 +386,7 @@ func (h *Handler) ComRegisterReplica(c *mysql.Conn, replicaHost string, replicaP
 		return nil
 	}
 
-	newCtx := sql.NewContext(context.Background())
+	newCtx := sql.NewEmptyContext()
 	primaryController := h.e.Analyzer.Catalog.GetBinlogPrimaryController()
 	return primaryController.RegisterReplica(newCtx, c, replicaHost, replicaPort)
 }
@@ -390,7 +402,7 @@ func (h *Handler) ComBinlogDumpGTID(c *mysql.Conn, logFile string, logPos uint64
 		Debug("Handling COM_BINLOG_DUMP_GTID")
 
 	// TODO: is logfile and logpos ever actually needed for COM_BINLOG_DUMP_GTID?
-	newCtx := sql.NewContext(context.Background())
+	newCtx := sql.NewEmptyContext()
 	primaryController := h.e.Analyzer.Catalog.GetBinlogPrimaryController()
 	return primaryController.BinlogDumpGtid(newCtx, c, gtidSet)
 }
@@ -495,6 +507,8 @@ func (h *Handler) doQuery(
 		r, err = resultForEmptyIter(sqlCtx, rowIter, resultFields)
 	} else if analyzer.FlagIsSet(qFlags, sql.QFlagMax1Row) {
 		r, err = resultForMax1RowIter(sqlCtx, schema, rowIter, resultFields, buf)
+	} else if vr, ok := rowIter.(sql.ValueRowIter); ok && vr.IsValueRowIter(sqlCtx) {
+		r, processedAtLeastOneBatch, err = h.resultForValueRowIter(sqlCtx, c, schema, vr, resultFields, buf, callback, more)
 	} else {
 		r, processedAtLeastOneBatch, err = h.resultForDefaultIter(sqlCtx, c, schema, rowIter, callback, resultFields, more, buf)
 	}
@@ -620,53 +634,11 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 	defer trace.StartRegion(ctx, "Handler.resultForDefaultIter").End()
 
 	eg, ctx := ctx.NewErrgroup()
-	pan2err := func(err *error) {
-		if recoveredPanic := recover(); recoveredPanic != nil {
-			stack := debug.Stack()
-			wrappedErr := fmt.Errorf("handler caught panic: %v\n%s", recoveredPanic, stack)
-			*err = goerrors.Join(*err, wrappedErr)
-		}
-	}
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-
-	var r *sqltypes.Result
-	var processedAtLeastOneBatch bool
-
-	// Read rows off the row iterator and send them to the row channel.
-	iter, projs := GetDeferredProjections(iter)
-	var rowChan = make(chan sql.Row, 512)
-	eg.Go(func() (err error) {
-		defer pan2err(&err)
-		defer wg.Done()
-		defer close(rowChan)
-		for {
-			select {
-			case <-ctx.Done():
-				return context.Cause(ctx)
-			default:
-				row, err := iter.Next(ctx)
-				if err == io.EOF {
-					return nil
-				}
-				if err != nil {
-					return err
-				}
-				select {
-				case rowChan <- row:
-				case <-ctx.Done():
-					return nil
-				}
-			}
-		}
-	})
-
 	// TODO: poll for closed connections should obviously also run even if
 	// we're doing something with an OK result or a single row result, etc.
 	// This should be in the caller.
 	pollCtx, cancelF := ctx.NewSubContext()
-	eg.Go(func() (err error) {
-		defer pan2err(&err)
+	errguard.Go(eg, func() error {
 		return h.pollForClosedConnection(pollCtx, c)
 	})
 
@@ -683,76 +655,133 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 
 	// Wrap the callback to include a BytesBuffer.Reset() for non-cursor requests, to
 	// clean out rows that have already been spooled.
-	resetCallback := func(r *sqltypes.Result, more bool) error {
-		// A server-side cursor allows the caller to fetch results cached on the server-side,
-		// so if a cursor exists, we can't release the buffer memory yet.
-		if c.StatusFlags&uint16(mysql.ServerCursorExists) != 0 {
+	// A server-side cursor allows the caller to fetch results cached on the server-side,
+	// so if a cursor exists, we can't release the buffer memory yet.
+	if c.StatusFlags&uint16(mysql.ServerCursorExists) != 0 {
+		callback = func(r *sqltypes.Result, more bool) error {
 			defer buf.Reset()
+			return callback(r, more)
 		}
-		return callback(r, more)
 	}
 
-	// Reads rows from the channel, converts them to wire format,
-	// and calls |callback| to give them to vitess.
-	eg.Go(func() (err error) {
-		defer pan2err(&err)
-		defer cancelF()
+	iter, projs := GetDeferredProjections(iter)
+
+	wg := sync.WaitGroup{}
+	wg.Add(3)
+
+	// Read rows off the row iterator and send them to the row channel.
+	var rowChan = make(chan sql.Row, 512)
+	errguard.Go(eg, func() error {
 		defer wg.Done()
+		defer close(rowChan)
 		for {
-			if r == nil {
-				r = &sqltypes.Result{Fields: resultFields}
-			}
-			if r.RowsAffected == rowsBatch {
-				if err := resetCallback(r, more); err != nil {
-					return err
+			select {
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			default:
+				row, iErr := iter.Next(ctx)
+				if iErr == io.EOF {
+					return nil
 				}
-				r = nil
-				processedAtLeastOneBatch = true
-				continue
+				if iErr != nil {
+					return iErr
+				}
+				select {
+				case rowChan <- row:
+				case <-ctx.Done():
+					return nil
+				}
+			}
+		}
+	})
+
+	// Drain rows from rowChan, convert to wire format, and send to resChan
+	var resChan = make(chan *sqltypes.Result, 4)
+	var res *sqltypes.Result
+	errguard.Go(eg, func() error {
+		defer wg.Done()
+		defer close(resChan)
+
+		for {
+			if res == nil {
+				res = &sqltypes.Result{
+					Fields: resultFields,
+					Rows:   make([][]sqltypes.Value, 0, rowsBatch),
+				}
 			}
 
 			select {
 			case <-ctx.Done():
 				return context.Cause(ctx)
+
+			case <-timer.C:
+				if h.readTimeout != 0 {
+					// Cancel and return so Vitess can call the CloseConnection callback
+					ctx.GetLogger().Warn("connection timeout")
+					return ErrRowTimeout.New()
+				}
+
 			case row, ok := <-rowChan:
 				if !ok {
 					return nil
 				}
+
 				if types.IsOkResult(row) {
-					if len(r.Rows) > 0 {
+					if res.RowsAffected > 0 {
 						panic("Got OkResult mixed with RowResult")
 					}
-					r = resultFromOkResult(row[0].(types.OkResult))
+					res = resultFromOkResult(row[0].(types.OkResult))
 					continue
 				}
 
-				outputRow, err := RowToSQL(ctx, schema, row, projs, buf)
+				outRow, sqlErr := RowToSQL(ctx, schema, row, projs, buf)
+				if sqlErr != nil {
+					return sqlErr
+				}
+
+				ctx.GetLogger().Tracef("spooling result row %s", outRow)
+				res.Rows = append(res.Rows, outRow)
+				res.RowsAffected++
+
+				if res.RowsAffected == rowsBatch {
+					select {
+					case <-ctx.Done():
+						return context.Cause(ctx)
+					case resChan <- res:
+						res = nil
+					}
+				}
+			}
+
+			timer.Reset(waitTime)
+		}
+	})
+
+	// Drain sqltypes.Result from resChan and call callback (send to client and potentially reset buffer)
+	var processedAtLeastOneBatch bool
+	errguard.Go(eg, func() (err error) {
+		defer cancelF()
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			case r, ok := <-resChan:
+				if !ok {
+					return nil
+				}
+				processedAtLeastOneBatch = true
+				err = callback(r, more)
 				if err != nil {
 					return err
 				}
-
-				ctx.GetLogger().Tracef("spooling result row %s", outputRow)
-				r.Rows = append(r.Rows, outputRow)
-				r.RowsAffected++
-				if !timer.Stop() {
-					<-timer.C
-				}
-			case <-timer.C:
-				// TODO: timer should probably go in its own thread, as rowChan is blocking
-				if h.readTimeout != 0 {
-					// Cancel and return so Vitess can call the CloseConnection callback
-					ctx.GetLogger().Tracef("connection timeout")
-					return ErrRowTimeout.New()
-				}
 			}
-			timer.Reset(waitTime)
 		}
 	})
 
 	// Close() kills this PID in the process list,
 	// wait until all rows have be sent over the wire
-	eg.Go(func() (err error) {
-		defer pan2err(&err)
+	errguard.Go(eg, func() error {
 		wg.Wait()
 		return iter.Close(ctx)
 	})
@@ -765,7 +794,166 @@ func (h *Handler) resultForDefaultIter(ctx *sql.Context, c *mysql.Conn, schema s
 		}
 		return nil, false, err
 	}
-	return r, processedAtLeastOneBatch, nil
+	return res, processedAtLeastOneBatch, nil
+}
+
+func (h *Handler) resultForValueRowIter(ctx *sql.Context, c *mysql.Conn, schema sql.Schema, iter sql.ValueRowIter, resultFields []*querypb.Field, buf *sql.ByteBuffer, callback func(*sqltypes.Result, bool) error, more bool) (*sqltypes.Result, bool, error) {
+	defer trace.StartRegion(ctx, "Handler.resultForValueRowIter").End()
+
+	eg, ctx := ctx.NewErrgroup()
+	// TODO: poll for closed connections should obviously also run even if
+	// we're doing something with an OK result or a single row result, etc.
+	// This should be in the caller.
+	pollCtx, cancelF := ctx.NewSubContext()
+	errguard.Go(eg, func() error {
+		return h.pollForClosedConnection(pollCtx, c)
+	})
+
+	// Default waitTime is one minute if there is no timeout configured, in which case
+	// it will loop to iterate again unless the socket died by the OS timeout or other problems.
+	// If there is a timeout, it will be enforced to ensure that Vitess has a chance to
+	// call Handler.CloseConnection()
+	waitTime := 1 * time.Minute
+	if h.readTimeout > 0 {
+		waitTime = h.readTimeout
+	}
+	timer := time.NewTimer(waitTime)
+	defer timer.Stop()
+
+	// Wrap the callback to include a BytesBuffer.Reset() for non-cursor requests, to
+	// clean out rows that have already been spooled.
+	// A server-side cursor allows the caller to fetch results cached on the server-side,
+	// so if a cursor exists, we can't release the buffer memory yet.
+	if c.StatusFlags&uint16(mysql.ServerCursorExists) != 0 {
+		callback = func(r *sqltypes.Result, more bool) error {
+			defer buf.Reset()
+			return callback(r, more)
+		}
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(3)
+
+	// Drain rows from iter and send to rowsChan
+	var rowChan = make(chan sql.ValueRow, 512)
+	errguard.Go(eg, func() error {
+		defer wg.Done()
+		defer close(rowChan)
+		for {
+			select {
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			default:
+				row, iErr := iter.NextValueRow(ctx)
+				if iErr == io.EOF {
+					return nil
+				}
+				if iErr != nil {
+					return iErr
+				}
+				select {
+				case rowChan <- row:
+				case <-ctx.Done():
+					return nil
+				}
+			}
+		}
+	})
+
+	// Drain rows from rowChan, convert to wire format, and send to resChan
+	var resChan = make(chan *sqltypes.Result, 4)
+	var res *sqltypes.Result
+	errguard.Go(eg, func() error {
+		defer close(resChan)
+		defer wg.Done()
+
+		for {
+			if res == nil {
+				res = &sqltypes.Result{
+					Fields: resultFields,
+					Rows:   make([][]sqltypes.Value, rowsBatch),
+				}
+			}
+
+			select {
+			case <-ctx.Done():
+				return context.Cause(ctx)
+
+			case <-timer.C:
+				if h.readTimeout != 0 {
+					// Cancel and return so Vitess can call the CloseConnection callback
+					ctx.GetLogger().Warn("connection timeout")
+					return ErrRowTimeout.New()
+				}
+
+			case row, ok := <-rowChan:
+				if !ok {
+					return nil
+				}
+
+				outRow, sqlErr := RowValueToSQLValues(ctx, schema, row, buf)
+				if sqlErr != nil {
+					return sqlErr
+				}
+
+				ctx.GetLogger().Tracef("spooling result row %s", outRow)
+				res.Rows[res.RowsAffected] = outRow
+				res.RowsAffected++
+
+				if res.RowsAffected == rowsBatch {
+					select {
+					case <-ctx.Done():
+						return context.Cause(ctx)
+					case resChan <- res:
+						res = nil
+					}
+				}
+			}
+
+			timer.Reset(waitTime)
+		}
+	})
+
+	// Drain sqltypes.Result from resChan and call callback (send to client and reset buffer)
+	var processedAtLeastOneBatch bool
+	errguard.Go(eg, func() (err error) {
+		defer cancelF()
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			case r, ok := <-resChan:
+				if !ok {
+					return nil
+				}
+				processedAtLeastOneBatch = true
+				err = callback(r, more)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	})
+
+	// Close() kills this PID in the process list,
+	// wait until all rows have be sent over the wire
+	errguard.Go(eg, func() error {
+		wg.Wait()
+		return iter.Close(ctx)
+	})
+
+	err := eg.Wait()
+	if err != nil {
+		ctx.GetLogger().WithError(err).Warn("error running query")
+		if verboseErrorLogging {
+			fmt.Printf("Err: %+v", err)
+		}
+		return nil, false, err
+	}
+
+	res.Rows = res.Rows[:res.RowsAffected]
+	return res, processedAtLeastOneBatch, err
 }
 
 // See https://dev.mysql.com/doc/internals/en/status-flags.html
@@ -994,7 +1182,7 @@ func toSqlHelper(ctx *sql.Context, typ sql.Type, buf *sql.ByteBuffer, val interf
 		return typ.SQL(ctx, nil, val)
 	}
 	ret, err := typ.SQL(ctx, buf.Get(), val)
-	buf.Grow(ret.Len())
+	buf.Grow(ret.Len()) // TODO: shouldn't we check capacity beforehand?
 	return ret, err
 }
 
@@ -1033,6 +1221,39 @@ func RowToSQL(ctx *sql.Context, sch sql.Schema, row sql.Row, projs []sql.Express
 		if err != nil {
 			return nil, err
 		}
+	}
+	return outVals, nil
+}
+
+func RowValueToSQLValues(ctx *sql.Context, sch sql.Schema, row sql.ValueRow, buf *sql.ByteBuffer) ([]sqltypes.Value, error) {
+	if len(sch) == 0 {
+		return []sqltypes.Value{}, nil
+	}
+	var err error
+	outVals := make([]sqltypes.Value, len(sch))
+	for i, col := range sch {
+		// TODO: remove this check once all Types implement this
+		valType, ok := col.Type.(sql.ValueType)
+		if !ok {
+			if row[i].IsNull() {
+				outVals[i] = sqltypes.NULL
+				continue
+			}
+			outVals[i] = sqltypes.MakeTrusted(row[i].Typ, row[i].Val)
+			continue
+		}
+		if buf == nil {
+			outVals[i], err = valType.SQLValue(ctx, row[i], nil)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		outVals[i], err = valType.SQLValue(ctx, row[i], buf.Get())
+		if err != nil {
+			return nil, err
+		}
+		buf.Grow(outVals[i].Len())
 	}
 	return outVals, nil
 }

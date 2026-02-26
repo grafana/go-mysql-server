@@ -26,7 +26,7 @@ import (
 // AutoUuid is an expression that captures an automatically generated UUID value and stores it in the session for
 // later retrieval. AutoUuid is intended to only be used directly on top of a UUID function.
 type AutoUuid struct {
-	UnaryExpression
+	UnaryExpressionStub
 	uuidCol   *sql.Column
 	foundUuid bool
 }
@@ -38,8 +38,8 @@ var _ sql.CollationCoercible = (*AutoUuid)(nil)
 // because of package import cycles, we can't enforce that directly here.
 func NewAutoUuid(_ *sql.Context, col *sql.Column, child sql.Expression) *AutoUuid {
 	return &AutoUuid{
-		UnaryExpression: UnaryExpression{Child: child},
-		uuidCol:         col,
+		UnaryExpressionStub: UnaryExpressionStub{Child: child},
+		uuidCol:             col,
 	}
 }
 
@@ -77,7 +77,7 @@ func (au *AutoUuid) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 		//       read this value too early. We should verify this isn't how MySQL behaves, and then could fix
 		//       by setting a PENDING_LAST_INSERT_UUID value in the session query info, then moving it to
 		//       LAST_INSERT_UUID in the session query info at the end of execution.
-		ctx.Session.SetLastQueryInfoString(sql.LastInsertUuid, uuidValue)
+		ctx.GetLastQueryInfo().LastInsertUUID.Store(uuidValue)
 		au.foundUuid = true
 	}
 
@@ -94,9 +94,9 @@ func (au *AutoUuid) WithChildren(children ...sql.Expression) (sql.Expression, er
 		return nil, sql.ErrInvalidChildrenNumber.New(au, len(children), 1)
 	}
 	return &AutoUuid{
-		UnaryExpression: UnaryExpression{Child: children[0]},
-		uuidCol:         au.uuidCol,
-		foundUuid:       au.foundUuid,
+		UnaryExpressionStub: UnaryExpressionStub{Child: children[0]},
+		uuidCol:             au.uuidCol,
+		foundUuid:           au.foundUuid,
 	}, nil
 }
 

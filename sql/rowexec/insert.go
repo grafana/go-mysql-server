@@ -57,7 +57,7 @@ type insertIter struct {
 
 func getInsertExpressions(values sql.Node) []sql.Expression {
 	var exprs []sql.Expression
-	transform.Inspect(values, func(node sql.Node) bool {
+	transform.InspectWithOpaque(values, func(node sql.Node) bool {
 		switch node := node.(type) {
 		case *plan.Project:
 			exprs = node.Projections
@@ -131,7 +131,7 @@ func (i *insertIter) Next(ctx *sql.Context) (returnRow sql.Row, returnErr error)
 			} else {
 				converted, inRange, cErr = col.Type.Convert(ctxWithColumnInfo, val)
 			}
-			if cErr == nil && !inRange {
+			if cErr == nil && inRange != sql.InRange {
 				cErr = sql.ErrValueOutOfRange.New(val, col.Type)
 			}
 			if sql.ErrTruncatedIncorrect.Is(cErr) {
@@ -144,7 +144,7 @@ func (i *insertIter) Next(ctx *sql.Context) (returnRow sql.Row, returnErr error)
 				// ERROR 3140 (22032): Invalid JSON text: "Invalid value." at position 0 in value for column
 				// 'table.column'.
 				if i.ignore && col.Type.Type() != query.Type_JSON {
-					if _, ok := col.Type.(sql.NumberType); ok {
+					if sql.IsNumberType(col.Type) {
 						if converted == nil {
 							converted = i.schema[idx].Type.Zero()
 						}
@@ -182,7 +182,7 @@ func (i *insertIter) Next(ctx *sql.Context) (returnRow sql.Row, returnErr error)
 			toReturn[i+len(row)] = row[i]
 		}
 		// May have multiple duplicate pk & unique errors due to multiple indexes
-		//TODO: how does this interact with triggers?
+		// TODO: how does this interact with triggers?
 		for {
 			if err := i.replacer.Insert(ctx, row); err != nil {
 				if !sql.ErrPrimaryKeyViolation.Is(err) && !sql.ErrUniqueKeyViolation.Is(err) {
@@ -355,7 +355,7 @@ func (i *insertIter) updateLastInsertId(ctx *sql.Context, row sql.Row) {
 	}
 	if i.firstGeneratedAutoIncRowIdx == 0 {
 		autoIncVal := i.getAutoIncVal(row)
-		ctx.SetLastQueryInfoInt(sql.LastInsertId, autoIncVal)
+		ctx.GetLastQueryInfo().LastInsertId.Store(autoIncVal)
 	}
 	i.firstGeneratedAutoIncRowIdx--
 }

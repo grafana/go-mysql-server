@@ -44,12 +44,18 @@ func (b *BaseBuilder) buildTopN(ctx *sql.Context, n *plan.TopN, row sql.Row) (sq
 		span.End()
 		return nil, err
 	}
-
 	limit, err := iters.GetInt64Value(ctx, n.Limit)
 	if err != nil {
 		return nil, err
 	}
-	return sql.NewSpanIter(span, iters.NewTopRowsIter(n.Fields, limit, n.CalcFoundRows, i, len(n.Child.Schema()))), nil
+
+	var topIter sql.RowIter
+	if limit == 1 {
+		topIter = iters.NewTopRowIter(n.Fields, n.CalcFoundRows, i)
+	} else {
+		topIter = iters.NewTopRowsIter(n.Fields, limit, n.CalcFoundRows, i, len(n.Child.Schema()))
+	}
+	return sql.NewSpanIter(span, topIter), nil
 }
 
 func (b *BaseBuilder) buildValueDerivedTable(ctx *sql.Context, n *plan.ValueDerivedTable, row sql.Row) (sql.RowIter, error) {
@@ -226,7 +232,8 @@ func (b *BaseBuilder) buildHashLookup(ctx *sql.Context, n *plan.HashLookup, row 
 		}
 		return newHashLookupGeneratingIter(n, childIter), nil
 	}
-	key, err := n.GetHashKey(ctx, n.LeftProbeKey, row)
+	// TODO: handle out of range keys?
+	key, _, err := n.GetHashKey(ctx, n.LeftProbeKey, row)
 	if err != nil {
 		return nil, err
 	}
@@ -771,15 +778,19 @@ func (b *BaseBuilder) buildDistinct(ctx *sql.Context, n *plan.Distinct, row sql.
 		return nil, err
 	}
 
-	return sql.NewSpanIter(span, iters.NewDistinctIter(ctx, it)), nil
+	return sql.NewSpanIter(span, iters.NewDistinctIter(ctx, it, n.Hasher())), nil
 }
 
 func (b *BaseBuilder) buildIndexedTableAccess(ctx *sql.Context, n *plan.IndexedTableAccess, row sql.Row) (sql.RowIter, error) {
 	span, ctx := ctx.Span("plan.IndexedTableAccess")
 
-	lookup, err := n.GetLookup(ctx, row)
+	lookup, inRange, err := n.GetLookup(ctx, row)
 	if err != nil {
 		return nil, err
+	}
+
+	if !inRange {
+		return sql.RowsToRowIter(), nil
 	}
 
 	partIter, err := n.Table.LookupPartitions(ctx, lookup)
@@ -836,11 +847,11 @@ func (b *BaseBuilder) buildSetOp(ctx *sql.Context, s *plan.SetOp, row sql.Row) (
 			return nil, err
 		}
 		if s.Distinct {
-			dIter := iters.NewDistinctIter(ctx, iter)
+			dIter := iters.NewDistinctIter(ctx, iter, plan.DistinctHasher{})
 			s.AddDispose(dIter.DisposeFunc)
 			iter = dIter
 
-			dIter2 := iters.NewDistinctIter(ctx, iter2)
+			dIter2 := iters.NewDistinctIter(ctx, iter2, plan.DistinctHasher{})
 			s.AddDispose(dIter2.DisposeFunc)
 			iter2 = dIter2
 		}
@@ -851,7 +862,7 @@ func (b *BaseBuilder) buildSetOp(ctx *sql.Context, s *plan.SetOp, row sql.Row) (
 	}
 
 	if s.Distinct && s.SetOpType != plan.ExceptType {
-		dIter := iters.NewDistinctIter(ctx, iter)
+		dIter := iters.NewDistinctIter(ctx, iter, plan.DistinctHasher{})
 		s.AddDispose(dIter.DisposeFunc)
 		iter = dIter
 	}

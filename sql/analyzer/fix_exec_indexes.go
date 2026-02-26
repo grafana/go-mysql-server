@@ -53,7 +53,7 @@ func assignExecIndexes(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Sc
 			}
 		}
 	case *plan.DeleteFrom:
-		if n.RefsSingleRel && !n.HasExplicitTargets() && scope.IsEmpty() && !n.IsProcNested {
+		if n.RefsSingleRel && !n.HasExplicitTargets() && scope.IsEmpty() && !n.IsProcNested && !n.Child.Schema().HasVirtualColumns() {
 			// joins, subqueries, triggers, and procedures preclude fast indexing
 			return offsetAssignIndexes(n), transform.NewTree, nil
 		}
@@ -71,7 +71,7 @@ func assignExecIndexes(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Sc
 func relIsProjected(n sql.Node) (sql.ColSet, bool) {
 	proj := true
 	var cols sql.ColSet
-	transform.Inspect(n, func(n sql.Node) bool {
+	transform.InspectWithOpaque(n, func(n sql.Node) bool {
 		var table sql.Table
 		switch n := n.(type) {
 		case *plan.IndexedTableAccess:
@@ -341,17 +341,18 @@ func (s *idxScope) visitChildren(n sql.Node) error {
 		}
 	case *plan.SubqueryAlias:
 		sqScope := s.copy()
+		if s.inTrigger() {
+			// TODO: this might not necessarily be true. But we do need the trigger scope(s) to be passed to the child
+			// nodes during rowexec, where there's currently no easy way to separate out the trigger scopes from the
+			// other scopes because it's all one parent row
+			n.OuterScopeVisibility = true
+		}
 		if !n.OuterScopeVisibility && !n.IsLateral {
 			// TODO: this should not apply to subqueries inside of lateral joins
 			// Subqueries with no visibility have no parent scopes. Lateral
 			// join subquery aliases continue to enjoy full visibility.
 			sqScope.parentScopes = sqScope.parentScopes[:0]
 			sqScope.lateralScopes = sqScope.lateralScopes[:0]
-			for _, p := range s.parentScopes {
-				if p.triggerScope {
-					sqScope.parentScopes = append(sqScope.parentScopes, p)
-				}
-			}
 		}
 		newC, cScope, err := assignIndexesHelper(n.Child, sqScope)
 		if err != nil {
@@ -654,19 +655,14 @@ func (s *idxScope) finalizeSelf(n sql.Node) (sql.Node, error) {
 			if len(s.parentScopes) == 0 {
 				return n, nil
 			}
-			// TODO: combine scopes?
-			scopeLen := len(s.parentScopes[0].columns)
+			scopeLen := 0
+			for _, parentScope := range s.parentScopes {
+				scopeLen += len(parentScope.columns)
+			}
 			if scopeLen == 0 {
 				return n, nil
 			}
 			n = jn.WithScopeLen(scopeLen)
-			n, err = n.WithChildren(
-				plan.NewStripRowNode(jn.Left(), scopeLen),
-				plan.NewStripRowNode(jn.Right(), scopeLen),
-			)
-			if err != nil {
-				return nil, err
-			}
 		}
 		return n, nil
 	}
@@ -706,6 +702,10 @@ func columnIdsForNode(n sql.Node) []sql.ColumnId {
 		}
 	case *plan.SetOp:
 		ret = append(ret, columnIdsForNode(n.Left())...)
+	case *plan.EmptyTable:
+		// ColumnIds are all zero here. The index will be determined based on the column name or by the Projector that
+		// wraps the EmptyTable.
+		return make([]sql.ColumnId, len(n.Schema()))
 	case plan.TableIdNode:
 		if rt, ok := n.(*plan.ResolvedTable); ok && plan.IsDualTable(rt.Table) {
 			ret = append(ret, 0)

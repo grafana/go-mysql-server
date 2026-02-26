@@ -472,6 +472,24 @@ func CompareNulls(a interface{}, b interface{}) (bool, int) {
 	return false, 0
 }
 
+// CompareNullValues compares two sql.Values, and returns true if either is null.
+// The returned integer represents the ordering, with a rule that states nulls
+// as being ordered before non-nulls.
+func CompareNullValues(a, b sql.Value) (bool, int) {
+	aIsNull := a.IsNull()
+	bIsNull := b.IsNull()
+	switch {
+	case aIsNull && bIsNull:
+		return true, 0
+	case aIsNull && !bIsNull:
+		return false, 1
+	case !aIsNull && bIsNull:
+		return false, -1
+	default:
+		return false, 0
+	}
+}
+
 // NumColumns returns the number of columns in a type. This is one for all
 // types, except tuples.
 func NumColumns(t sql.Type) int {
@@ -758,7 +776,7 @@ func TypeAwareConversion(ctx *sql.Context, val interface{}, originalType sql.Typ
 	if (IsEnum(originalType) || IsSet(originalType)) && IsText(convertedType) {
 		val, _, err = ConvertToCollatedString(ctx, val, originalType)
 		if err != nil {
-			return nil, sql.OutOfRange, err
+			return nil, sql.InRange, err
 		}
 	}
 	return convertedType.Convert(ctx, val)
@@ -769,26 +787,26 @@ func TypeAwareConversion(ctx *sql.Context, val interface{}, originalType sql.Typ
 // value is truncated to the Zero value for type |t|. If the value does not convert and the type is not automatically
 // coerced, then return an error.
 // TODO: Should truncate to number prefix instead of Zero.
-func ConvertOrTruncate(ctx *sql.Context, i interface{}, t sql.Type) (interface{}, error) {
-	converted, _, err := t.Convert(ctx, i)
+func ConvertOrTruncate(ctx *sql.Context, i any, t sql.Type) (any, sql.ConvertInRange, error) {
+	converted, inRange, err := t.Convert(ctx, i)
 	if err == nil {
-		return converted, nil
+		return converted, inRange, nil
 	}
 	if sql.ErrTruncatedIncorrect.Is(err) {
 		ctx.Warn(mysql.ERTruncatedWrongValue, "%s", err.Error())
-		return converted, nil
+		return converted, inRange, nil
 	}
 
 	// If a value can't be converted to an enum or set type, truncate it to a value that is guaranteed
 	// to not match any enum value.
 	if IsEnum(t) || IsSet(t) {
-		return nil, nil
+		return nil, inRange, nil
 	}
 
 	// Values for numeric and string types are automatically coerced. For all other types, if they
 	// don't convert cleanly, it's an error.
 	if err != nil && !(IsNumber(t) || IsTextOnly(t)) {
-		return nil, err
+		return nil, inRange, err
 	}
 
 	// For numeric and string types, if the value can't be cleanly converted, truncate to the zero value for
@@ -803,5 +821,5 @@ func ConvertOrTruncate(ctx *sql.Context, i interface{}, t sql.Type) (interface{}
 		ctx.Session.Warn(&warning)
 	}
 
-	return t.Zero(), nil
+	return t.Zero(), inRange, nil
 }

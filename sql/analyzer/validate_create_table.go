@@ -15,6 +15,7 @@
 package analyzer
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/dolthub/go-mysql-server/sql"
@@ -36,6 +37,13 @@ func validateCreateTable(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.
 	err := validateIdentifiers(ct)
 	if err != nil {
 		return nil, transform.SameTree, err
+	}
+
+	// For CREATE TABLE AS SELECT, skip validation here because the schema isn't complete yet.
+	// The resolveCreateSelect analyzer rule will merge schemas and create a new CreateTable node,
+	// which will be validated separately after the merge.
+	if ct.Select() != nil {
+		return n, transform.SameTree, nil
 	}
 
 	sch := ct.PkSchema().Schema
@@ -85,9 +93,9 @@ func validateNoVirtualColumnsInPrimaryKey(sch sql.Schema) error {
 // validation rules
 func validateAlterTable(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scope, sel RuleSelector, qFlags *sql.QueryFlags) (sql.Node, transform.TreeIdentity, error) {
 	var err error
-	// Inspect is required here because alter table statements with multiple clauses are represented as a block of
+	// InspectWithOpaque is required here because alter table statements with multiple clauses are represented as a block of
 	// plan nodes
-	transform.Inspect(n, func(sql.Node) bool {
+	transform.InspectWithOpaque(n, func(sql.Node) bool {
 		switch n := n.(type) {
 		case *plan.RenameTable:
 			for _, name := range n.NewNames {
@@ -167,7 +175,7 @@ func resolveAlterColumn(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.S
 	var validator sql.SchemaValidator
 	keyedColumns := make(map[string]bool)
 	var err error
-	transform.Inspect(n, func(n sql.Node) bool {
+	transform.InspectWithOpaque(n, func(n sql.Node) bool {
 		if st, ok := n.(sql.SchemaTarget); ok {
 			sch = st.TargetSchema()
 		}
@@ -878,6 +886,16 @@ func validateIndex(ctx *sql.Context, colMap map[string]*sql.Column, idxDef *sql.
 		err := validatePrefixLength(ctx, idxCol.Name, idxCol.Length, schCol.Type, strictMySQLCompat, idxDef.IsUnique())
 		if err != nil {
 			return err
+		}
+	}
+
+	if idxDef.IsVector() {
+		if len(idxDef.Columns) != 1 {
+			return fmt.Errorf("a vector index must have exactly one column")
+		}
+		schCol, _ := colMap[strings.ToLower(idxDef.Columns[0].Name)]
+		if schCol.Nullable {
+			return sql.ErrNullableVectorIdx.New()
 		}
 	}
 

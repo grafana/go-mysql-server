@@ -30,6 +30,7 @@ import (
 
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/encodings"
+	"github.com/dolthub/go-mysql-server/sql/values"
 )
 
 const (
@@ -155,6 +156,11 @@ func (t SetType) Compare(ctx context.Context, a interface{}, b interface{}) (int
 	return 0, nil
 }
 
+// CompareValue implements the ValueType interface
+func (t SetType) CompareValue(ctx *sql.Context, a, b sql.Value) (int, error) {
+	panic("TODO: implement CompareValue for SetType")
+}
+
 // Convert implements Type interface.
 // Returns the string representing the given value if applicable.
 func (t SetType) Convert(ctx context.Context, v interface{}) (interface{}, sql.ConvertInRange, error) {
@@ -198,12 +204,11 @@ func (t SetType) Convert(ctx context.Context, v interface{}) (interface{}, sql.C
 		return t.Convert(ctx, value.Decimal.BigInt().Uint64())
 	case string:
 		ret, err := t.convertStringToBitField(value)
-		return ret, err == nil, err
+		return ret, sql.InRange, err
 	case []byte:
 		return t.Convert(ctx, string(value))
 	}
-
-	return uint64(0), sql.OutOfRange, sql.ErrConvertingToSet.New(v)
+	return uint64(0), sql.InRange, sql.ErrConvertingToSet.New(v)
 }
 
 // MaxTextResponseByteLength implements the Type interface
@@ -259,6 +264,36 @@ func (t SetType) SQL(ctx *sql.Context, dest []byte, v interface{}) (sqltypes.Val
 	val := encodedBytes
 
 	return sqltypes.MakeTrusted(sqltypes.Set, val), nil
+}
+
+// SQLValue implements ValueType interface.
+func (t SetType) SQLValue(ctx *sql.Context, v sql.Value, dest []byte) (sqltypes.Value, error) {
+	if v.IsNull() {
+		return sqltypes.NULL, nil
+	}
+
+	bits := values.ReadUint64(v.Val)
+	value, err := t.BitsToString(bits)
+	if err != nil {
+		return sqltypes.Value{}, err
+	}
+
+	resultCharset := ctx.GetCharacterSetResults()
+	if resultCharset == sql.CharacterSet_Unspecified || resultCharset == sql.CharacterSet_binary {
+		resultCharset = t.collation.CharacterSet()
+	}
+
+	// TODO: write append style encoder
+	res, ok := resultCharset.Encoder().Encode(encodings.StringToBytes(value))
+	if !ok {
+		if len(value) > 50 {
+			value = value[:50]
+		}
+		value = strings.ToValidUTF8(value, string(utf8.RuneError))
+		return sqltypes.Value{}, sql.ErrCharSetFailedToEncode.New(resultCharset.Name(), utf8.ValidString(value), value)
+	}
+
+	return sqltypes.MakeTrusted(sqltypes.Set, res), nil
 }
 
 // String implements Type interface.

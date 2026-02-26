@@ -3872,6 +3872,163 @@ end;
 			},
 		},
 	},
+	{
+		// https://github.com/dolthub/dolt/issues/10175
+		Name: "trigger with insert using filter",
+		SetUpScript: []string{
+			"CREATE TABLE t_1 (id BINARY(2), other BINARY(2), status TINYINT UNSIGNED);",
+			"CREATE TABLE oldstatus (id BINARY(2), status TINYINT UNSIGNED);",
+			"INSERT INTO t_1 (id, other, status) VALUES ROW(0x3E32, 0xC336, 0), ROW(0xEDC1, 0xC336, 0), ROW(0x9B15, 0xC336, 0);",
+			"CREATE TRIGGER t_change_status before UPDATE ON t_1 FOR EACH ROW INSERT INTO oldstatus (id, status) SELECT id, status FROM t_1 WHERE id = NEW.id;",
+			"UPDATE t_1 SET status = 1 WHERE id = 0x3E32;",
+			"create table src(a int, b int, c int)",
+			"create table dest(i int, j int)",
+			"create trigger trig before update on src for each row insert into dest(j, i) select a, c from src where b = new.b",
+			"insert into src values (1, 2, 3)",
+			"update src set a = 4 where b = 2",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    `SELECT * FROM oldstatus`,
+				Expected: []sql.Row{{[]uint8{0x3e, 0x32}, uint8(0)}},
+			},
+			{
+				Query:    "select * from dest",
+				Expected: []sql.Row{{3, 1}},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10175
+		Name: "trigger with joined view (views are subquery aliases)",
+		SetUpScript: []string{
+			"CREATE TABLE t_1 (id BINARY(2), data VARCHAR(10));",
+			"CREATE TABLE t_2 (id BINARY(2), other BINARY(2), status TINYINT UNSIGNED default 0);",
+			"CREATE TABLE queue (id BINARY(2), data varchar(10));",
+			"CREATE VIEW v AS SELECT t_2.id, t_1.data, status FROM t_2 inner join t_1 on other=t_1.id;",
+			"INSERT INTO t_1 (id, data) VALUES (0xC336, 'Test');",
+			"INSERT INTO t_2 (id, other) VALUES ROW(0x3E32, 0xC336), ROW(0xEDC1, 0xC336), ROW(0x9B15, 0xC336);",
+			"CREATE TRIGGER t_change_status after UPDATE ON t_2 FOR EACH ROW INSERT INTO queue(id, data) select id, data from v where v.id = NEW.id;",
+			"UPDATE t_2 SET status = 1 WHERE id = 0x3E32;",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    `SELECT * FROM queue`,
+				Expected: []sql.Row{{[]uint8{0x3e, 0x32}, "Test"}},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10287
+		Name: "only throw 'column not found' error when trigger is actually triggered",
+		SetUpScript: []string{
+			"create table A(col0 int, col1 int)",
+			"create table B(col0 int, col1 int)",
+			"create table C(col0 int)",
+			"create trigger test_trigger after update on A for each row insert into C (col0) select col0 from B where B.col0 = new.col0",
+			"drop table B",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: "show triggers",
+				// assert trigger is still there
+				Expected: []sql.Row{
+					{
+						"test_trigger", // Trigger
+						"UPDATE",       // Event
+						"A",            // Table
+						"insert into C (col0) select col0 from B where B.col0 = new.col0", // Statement
+						"AFTER",               // Timing
+						time.Unix(0, 0).UTC(), // Created
+						"",                    // sql_mode
+						"",                    // Definer
+						sql.Collation_Default.CharacterSet().String(), // character_set_client
+						sql.Collation_Default.String(),                // collation_connection
+						sql.Collation_Default.String(),                // Database Collation
+					},
+				},
+			},
+			{
+				Query: "create table B(a int, b int)",
+				Expected: []sql.Row{
+					{types.NewOkResult(0)},
+				},
+			},
+			{
+				Query: "show triggers",
+				// assert trigger is still there
+				Expected: []sql.Row{
+					{
+						"test_trigger", // Trigger
+						"UPDATE",       // Event
+						"A",            // Table
+						"insert into C (col0) select col0 from B where B.col0 = new.col0", // Statement
+						"AFTER",               // Timing
+						time.Unix(0, 0).UTC(), // Created
+						"",                    // sql_mode
+						"",                    // Definer
+						sql.Collation_Default.CharacterSet().String(), // character_set_client
+						sql.Collation_Default.String(),                // collation_connection
+						sql.Collation_Default.String(),                // Database Collation
+					},
+				},
+			},
+			{
+				Query: "insert into C values (12)",
+				Expected: []sql.Row{
+					{types.NewOkResult(1)},
+				},
+			},
+			{
+				Query: "insert into A values (1, 2)",
+				Expected: []sql.Row{
+					{types.NewOkResult(1)},
+				},
+			},
+			{
+				Query:       "update A set A.col0=2 where true",
+				ExpectedErr: sql.ErrTableColumnNotFound,
+			},
+			{
+				Query:    "select * from A",
+				Expected: []sql.Row{{1, 2}},
+			},
+			{
+				Query: "show create trigger test_trigger",
+				// assert trigger info is there
+				Expected: []sql.Row{
+					{
+						"test_trigger",
+						"",
+						"create trigger test_trigger after update on A for each row insert into C (col0) select col0 from B where B.col0 = new.col0",
+						sql.Collation_Default.CharacterSet().String(),
+						sql.Collation_Default.String(),
+						sql.Collation_Default.String(),
+						time.Unix(0, 0).UTC(),
+					},
+				},
+			},
+			{
+				Query: "drop trigger test_trigger",
+				Expected: []sql.Row{
+					{types.NewOkResult(0)},
+				},
+			},
+			{
+				Query: "show triggers",
+				// assert trigger has been dropped
+				Expected: []sql.Row{},
+			},
+			{
+				// https://github.com/dolthub/dolt/issues/10291
+				Skip:  true,
+				Query: "create trigger test_trigger after update on A for each row insert into C (col0) select col0 from B where B.col0 = new.col0",
+				Expected: []sql.Row{
+					{types.NewOkResult(0)},
+				},
+			},
+		},
+	},
 }
 
 var TriggerCreateInSubroutineTests = []ScriptTest{

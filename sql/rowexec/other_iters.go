@@ -238,7 +238,8 @@ func (h *hashLookupGeneratingIter) Next(ctx *sql.Context) (sql.Row, error) {
 		return nil, err
 	}
 	// TODO: Maybe do not put nil stuff in here.
-	key, err := h.n.GetHashKey(ctx, h.n.RightEntryKey, childRow)
+	// TODO: Handle keys that are out of range?
+	key, _, err := h.n.GetHashKey(ctx, h.n.RightEntryKey, childRow)
 	if err != nil {
 		return nil, err
 	}
@@ -366,21 +367,4 @@ func (ci *concatIter) Close(ctx *sql.Context) error {
 	} else {
 		return nil
 	}
-}
-
-type stripRowIter struct {
-	sql.RowIter
-	numCols int
-}
-
-func (sri *stripRowIter) Next(ctx *sql.Context) (sql.Row, error) {
-	r, err := sri.RowIter.Next(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return r[sri.numCols:], nil
-}
-
-func (sri *stripRowIter) Close(ctx *sql.Context) error {
-	return sri.RowIter.Close(ctx)
 }

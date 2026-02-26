@@ -34,7 +34,7 @@ type Literal struct {
 }
 
 var _ sql.Expression = &Literal{}
-var _ sql.Expression2 = &Literal{}
+var _ sql.ValueExpression = &Literal{}
 var _ sql.CollationCoercible = &Literal{}
 var _ sqlparser.Injectable = &Literal{}
 
@@ -46,6 +46,18 @@ func NewLiteral(value interface{}, fieldType sql.Type) *Literal {
 		val2: val2,
 		Typ:  fieldType,
 	}
+}
+
+// NewTrue creates a new Literal that represents a true boolean
+// TODO: replace NewLiteral(true, types.Boolean) calls with call to NewTrue
+func NewTrue() *Literal {
+	return NewLiteral(true, types.Boolean)
+}
+
+// NewFalse creates a new Literal that represents a false boolean
+// TODO: replace NewLiteral(false, types.Boolean) calls with call to NewFalse
+func NewFalse() *Literal {
+	return NewLiteral(false, types.Boolean)
 }
 
 // Resolved implements the Expression interface.
@@ -136,21 +148,19 @@ func (*Literal) Children() []sql.Expression {
 	return nil
 }
 
-func (lit *Literal) Eval2(ctx *sql.Context, row sql.Row2) (sql.Value, error) {
+// EvalValue implements the sql.ValueExpression interface.
+func (lit *Literal) EvalValue(ctx *sql.Context, row sql.ValueRow) (sql.Value, error) {
 	return lit.val2, nil
 }
 
-func (lit *Literal) Type2() sql.Type2 {
-	t2, ok := lit.Typ.(sql.Type2)
-	if !ok {
-		panic(fmt.Errorf("expected Type2, but was %T", lit.Typ))
-	}
-	return t2
+// IsValueExpression implements the ValueExpression interface.
+func (lit *Literal) IsValueExpression() bool {
+	return types.IsInteger(lit.Typ)
 }
 
 // Value returns the literal value.
-func (p *Literal) Value() interface{} {
-	return p.Val
+func (lit *Literal) Value() interface{} {
+	return lit.Val
 }
 
 func (lit *Literal) WithResolvedChildren(children []any) (any, error) {

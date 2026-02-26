@@ -16288,115 +16288,660 @@ var IndexPlanTests = []QueryPlanTest{
 			"",
 	},
 	{
-		Query: `select * from comp_vector_index_t0 order by vec_distance('[50,50]', v2) limit 5`,
-		ExpectedPlan: "Limit(5)\n" +
-			" └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"     ├─ index: [comp_vector_index_t0.v2]\n" +
-			"     ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.v2) LIMIT 5 (bigint)\n" +
-			"     ├─ colSet: (1-3)\n" +
-			"     ├─ tableId: 1\n" +
-			"     └─ Table\n" +
-			"         ├─ name: comp_vector_index_t0\n" +
-			"         └─ columns: [pk v1 v2]\n" +
+		Query: `select * from comp_vector_index_t0 order by vec_distance('[50,50]', json_column) limit 5`,
+		ExpectedPlan: "IndexedTableAccess(comp_vector_index_t0)\n" +
+			" ├─ index: [comp_vector_index_t0.json_column]\n" +
+			" ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.json_column) LIMIT 5 (bigint)\n" +
+			" ├─ colSet: (1-4)\n" +
+			" ├─ tableId: 1\n" +
+			" └─ Table\n" +
+			"     ├─ name: comp_vector_index_t0\n" +
+			"     └─ columns: [pk v1 json_column vector_column]\n" +
 			"",
-		ExpectedEstimates: "Limit(5)\n" +
-			" └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"     ├─ index: [comp_vector_index_t0.v2]\n" +
-			"     ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.v2) LIMIT 5 (bigint)\n" +
-			"     └─ columns: [pk v1 v2]\n" +
+		ExpectedEstimates: "IndexedTableAccess(comp_vector_index_t0)\n" +
+			" ├─ index: [comp_vector_index_t0.json_column]\n" +
+			" ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.json_column) LIMIT 5 (bigint)\n" +
+			" └─ columns: [pk v1 json_column vector_column]\n" +
 			"",
-		ExpectedAnalysis: "Limit(5)\n" +
-			" └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"     ├─ index: [comp_vector_index_t0.v2]\n" +
-			"     ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.v2) LIMIT 5 (bigint)\n" +
-			"     └─ columns: [pk v1 v2]\n" +
+		ExpectedAnalysis: "IndexedTableAccess(comp_vector_index_t0)\n" +
+			" ├─ index: [comp_vector_index_t0.json_column]\n" +
+			" ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.json_column) LIMIT 5 (bigint)\n" +
+			" └─ columns: [pk v1 json_column vector_column]\n" +
 			"",
 	},
 	{
-		Query: `select * from comp_vector_index_t0 order by vec_distance(v2, '[50,50]') limit 5`,
-		ExpectedPlan: "Limit(5)\n" +
-			" └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"     ├─ index: [comp_vector_index_t0.v2]\n" +
-			"     ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.v2, '[50,50]') LIMIT 5 (bigint)\n" +
-			"     ├─ colSet: (1-3)\n" +
-			"     ├─ tableId: 1\n" +
-			"     └─ Table\n" +
-			"         ├─ name: comp_vector_index_t0\n" +
-			"         └─ columns: [pk v1 v2]\n" +
+		Query: `select * from comp_vector_index_t0 order by vec_distance('[50,50]', vector_column) limit 5`,
+		ExpectedPlan: "IndexedTableAccess(comp_vector_index_t0)\n" +
+			" ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			" ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.vector_column) LIMIT 5 (bigint)\n" +
+			" ├─ colSet: (1-4)\n" +
+			" ├─ tableId: 1\n" +
+			" └─ Table\n" +
+			"     ├─ name: comp_vector_index_t0\n" +
+			"     └─ columns: [pk v1 json_column vector_column]\n" +
 			"",
-		ExpectedEstimates: "Limit(5)\n" +
-			" └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"     ├─ index: [comp_vector_index_t0.v2]\n" +
-			"     ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.v2, '[50,50]') LIMIT 5 (bigint)\n" +
-			"     └─ columns: [pk v1 v2]\n" +
+		ExpectedEstimates: "IndexedTableAccess(comp_vector_index_t0)\n" +
+			" ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			" ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.vector_column) LIMIT 5 (bigint)\n" +
+			" └─ columns: [pk v1 json_column vector_column]\n" +
 			"",
-		ExpectedAnalysis: "Limit(5)\n" +
-			" └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"     ├─ index: [comp_vector_index_t0.v2]\n" +
-			"     ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.v2, '[50,50]') LIMIT 5 (bigint)\n" +
-			"     └─ columns: [pk v1 v2]\n" +
+		ExpectedAnalysis: "IndexedTableAccess(comp_vector_index_t0)\n" +
+			" ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			" ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.vector_column) LIMIT 5 (bigint)\n" +
+			" └─ columns: [pk v1 json_column vector_column]\n" +
 			"",
 	},
 	{
-		Query: `select pk+1 from comp_vector_index_t0 order by vec_distance('[50,50]', v2) limit 5`,
+		Query: `select * from comp_vector_index_t0 order by vec_distance(vector_column, '[50,50]') limit 5`,
+		ExpectedPlan: "IndexedTableAccess(comp_vector_index_t0)\n" +
+			" ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			" ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.vector_column, '[50,50]') LIMIT 5 (bigint)\n" +
+			" ├─ colSet: (1-4)\n" +
+			" ├─ tableId: 1\n" +
+			" └─ Table\n" +
+			"     ├─ name: comp_vector_index_t0\n" +
+			"     └─ columns: [pk v1 json_column vector_column]\n" +
+			"",
+		ExpectedEstimates: "IndexedTableAccess(comp_vector_index_t0)\n" +
+			" ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			" ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.vector_column, '[50,50]') LIMIT 5 (bigint)\n" +
+			" └─ columns: [pk v1 json_column vector_column]\n" +
+			"",
+		ExpectedAnalysis: "IndexedTableAccess(comp_vector_index_t0)\n" +
+			" ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			" ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.vector_column, '[50,50]') LIMIT 5 (bigint)\n" +
+			" └─ columns: [pk v1 json_column vector_column]\n" +
+			"",
+	},
+	{
+		Query: `select pk+1 from comp_vector_index_t0 order by vec_distance('[50,50]', vector_column) limit 5`,
 		ExpectedPlan: "Limit(5)\n" +
 			" └─ Project\n" +
 			"     ├─ columns: [(comp_vector_index_t0.pk:0!null + 1 (tinyint))->pk+1:0]\n" +
 			"     └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"         ├─ index: [comp_vector_index_t0.v2]\n" +
-			"         ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.v2) LIMIT 5 (bigint)\n" +
-			"         ├─ colSet: (1-3)\n" +
+			"         ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			"         ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.vector_column) LIMIT 5 (bigint)\n" +
+			"         ├─ colSet: (1-4)\n" +
 			"         ├─ tableId: 1\n" +
 			"         └─ Table\n" +
 			"             ├─ name: comp_vector_index_t0\n" +
-			"             └─ columns: [pk v2]\n" +
+			"             └─ columns: [pk vector_column]\n" +
 			"",
 		ExpectedEstimates: "Limit(5)\n" +
 			" └─ Project\n" +
 			"     ├─ columns: [(comp_vector_index_t0.pk + 1) as pk+1]\n" +
 			"     └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"         ├─ index: [comp_vector_index_t0.v2]\n" +
-			"         ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.v2) LIMIT 5 (bigint)\n" +
-			"         └─ columns: [pk v2]\n" +
+			"         ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			"         ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.vector_column) LIMIT 5 (bigint)\n" +
+			"         └─ columns: [pk vector_column]\n" +
 			"",
 		ExpectedAnalysis: "Limit(5)\n" +
 			" └─ Project\n" +
 			"     ├─ columns: [(comp_vector_index_t0.pk + 1) as pk+1]\n" +
 			"     └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"         ├─ index: [comp_vector_index_t0.v2]\n" +
-			"         ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.v2) LIMIT 5 (bigint)\n" +
-			"         └─ columns: [pk v2]\n" +
+			"         ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			"         ├─ order: VEC_DISTANCE_L2_SQUARED('[50,50]', comp_vector_index_t0.vector_column) LIMIT 5 (bigint)\n" +
+			"         └─ columns: [pk vector_column]\n" +
 			"",
 	},
 	{
-		Query: `select v1+1 from comp_vector_index_t0 order by vec_distance(v2, '[50,50]') limit 5`,
+		Query: `select v1+1 from comp_vector_index_t0 order by vec_distance(vector_column, '[50,50]') limit 5`,
 		ExpectedPlan: "Limit(5)\n" +
 			" └─ Project\n" +
 			"     ├─ columns: [(comp_vector_index_t0.v1:0 + 1 (tinyint))->v1+1:0]\n" +
 			"     └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"         ├─ index: [comp_vector_index_t0.v2]\n" +
-			"         ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.v2, '[50,50]') LIMIT 5 (bigint)\n" +
-			"         ├─ colSet: (1-3)\n" +
+			"         ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			"         ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.vector_column, '[50,50]') LIMIT 5 (bigint)\n" +
+			"         ├─ colSet: (1-4)\n" +
 			"         ├─ tableId: 1\n" +
 			"         └─ Table\n" +
 			"             ├─ name: comp_vector_index_t0\n" +
-			"             └─ columns: [v1 v2]\n" +
+			"             └─ columns: [v1 vector_column]\n" +
 			"",
 		ExpectedEstimates: "Limit(5)\n" +
 			" └─ Project\n" +
 			"     ├─ columns: [(comp_vector_index_t0.v1 + 1) as v1+1]\n" +
 			"     └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"         ├─ index: [comp_vector_index_t0.v2]\n" +
-			"         ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.v2, '[50,50]') LIMIT 5 (bigint)\n" +
-			"         └─ columns: [v1 v2]\n" +
+			"         ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			"         ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.vector_column, '[50,50]') LIMIT 5 (bigint)\n" +
+			"         └─ columns: [v1 vector_column]\n" +
 			"",
 		ExpectedAnalysis: "Limit(5)\n" +
 			" └─ Project\n" +
 			"     ├─ columns: [(comp_vector_index_t0.v1 + 1) as v1+1]\n" +
 			"     └─ IndexedTableAccess(comp_vector_index_t0)\n" +
-			"         ├─ index: [comp_vector_index_t0.v2]\n" +
-			"         ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.v2, '[50,50]') LIMIT 5 (bigint)\n" +
-			"         └─ columns: [v1 v2]\n" +
+			"         ├─ index: [comp_vector_index_t0.vector_column]\n" +
+			"         ├─ order: VEC_DISTANCE_L2_SQUARED(comp_vector_index_t0.vector_column, '[50,50]') LIMIT 5 (bigint)\n" +
+			"         └─ columns: [v1 vector_column]\n" +
+			"",
+	},
+	{
+		Query: `select * from (select pk2 as pk1 from (select pk2 as pk1, pk3 as pk2 from three_pk where pk1=0) t1 where pk1=0) t2 where pk1=0;`,
+		ExpectedPlan: "SubqueryAlias\n" +
+			" ├─ name: t2\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (14)\n" +
+			" ├─ tableId: 3\n" +
+			" └─ Project\n" +
+			"     ├─ columns: [t1.pk2:1!null->pk1:0]\n" +
+			"     └─ SubqueryAlias\n" +
+			"         ├─ name: t1\n" +
+			"         ├─ outerVisibility: false\n" +
+			"         ├─ isLateral: false\n" +
+			"         ├─ cacheable: true\n" +
+			"         ├─ colSet: (11,12)\n" +
+			"         ├─ tableId: 2\n" +
+			"         └─ Project\n" +
+			"             ├─ columns: [three_pk.pk2:1!null->pk1:0, three_pk.pk3:2!null->pk2:0]\n" +
+			"             └─ IndexedTableAccess(three_pk)\n" +
+			"                 ├─ index: [three_pk.pk1,three_pk.pk2,three_pk.pk3]\n" +
+			"                 ├─ static: [{[0, 0], [0, 0], [0, 0]}]\n" +
+			"                 ├─ colSet: (1-8)\n" +
+			"                 ├─ tableId: 1\n" +
+			"                 └─ Table\n" +
+			"                     ├─ name: three_pk\n" +
+			"                     └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+		ExpectedEstimates: "SubqueryAlias\n" +
+			" ├─ name: t2\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (14)\n" +
+			" ├─ tableId: 3\n" +
+			" └─ Project\n" +
+			"     ├─ columns: [t1.pk2 as pk1]\n" +
+			"     └─ SubqueryAlias\n" +
+			"         ├─ name: t1\n" +
+			"         ├─ outerVisibility: false\n" +
+			"         ├─ isLateral: false\n" +
+			"         ├─ cacheable: true\n" +
+			"         ├─ colSet: (11,12)\n" +
+			"         ├─ tableId: 2\n" +
+			"         └─ Project\n" +
+			"             ├─ columns: [three_pk.pk2 as pk1, three_pk.pk3 as pk2]\n" +
+			"             └─ IndexedTableAccess(three_pk)\n" +
+			"                 ├─ index: [three_pk.pk1,three_pk.pk2,three_pk.pk3]\n" +
+			"                 ├─ filters: [{[0, 0], [0, 0], [0, 0]}]\n" +
+			"                 └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+		ExpectedAnalysis: "SubqueryAlias\n" +
+			" ├─ name: t2\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (14)\n" +
+			" ├─ tableId: 3\n" +
+			" └─ Project\n" +
+			"     ├─ columns: [t1.pk2 as pk1]\n" +
+			"     └─ SubqueryAlias\n" +
+			"         ├─ name: t1\n" +
+			"         ├─ outerVisibility: false\n" +
+			"         ├─ isLateral: false\n" +
+			"         ├─ cacheable: true\n" +
+			"         ├─ colSet: (11,12)\n" +
+			"         ├─ tableId: 2\n" +
+			"         └─ Project\n" +
+			"             ├─ columns: [three_pk.pk2 as pk1, three_pk.pk3 as pk2]\n" +
+			"             └─ IndexedTableAccess(three_pk)\n" +
+			"                 ├─ index: [three_pk.pk1,three_pk.pk2,three_pk.pk3]\n" +
+			"                 ├─ filters: [{[0, 0], [0, 0], [0, 0]}]\n" +
+			"                 └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+	},
+	{
+		Query: `select * from three_pks_view where pk2 = 1;`,
+		ExpectedPlan: "SubqueryAlias\n" +
+			" ├─ name: three_pks_view\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (4-6)\n" +
+			" ├─ tableId: 3\n" +
+			" └─ IndexedTableAccess(three_pks)\n" +
+			"     ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"     ├─ static: [{[1, 1], [1, 1], [NULL, ∞)}]\n" +
+			"     ├─ colSet: (1-3)\n" +
+			"     ├─ tableId: 1\n" +
+			"     └─ Table\n" +
+			"         ├─ name: three_pks\n" +
+			"         └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+		ExpectedEstimates: "SubqueryAlias\n" +
+			" ├─ name: three_pks_view\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (4-6)\n" +
+			" ├─ tableId: 3\n" +
+			" └─ IndexedTableAccess(three_pks)\n" +
+			"     ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"     ├─ filters: [{[1, 1], [1, 1], [NULL, ∞)}]\n" +
+			"     └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+		ExpectedAnalysis: "SubqueryAlias\n" +
+			" ├─ name: three_pks_view\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (4-6)\n" +
+			" ├─ tableId: 3\n" +
+			" └─ IndexedTableAccess(three_pks)\n" +
+			"     ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"     ├─ filters: [{[1, 1], [1, 1], [NULL, ∞)}]\n" +
+			"     └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+	},
+	{
+		Query: `select * from view_in_view where pk3 = 1;`,
+		ExpectedPlan: "SubqueryAlias\n" +
+			" ├─ name: view_in_view\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (7-9)\n" +
+			" ├─ tableId: 5\n" +
+			" └─ SubqueryAlias\n" +
+			"     ├─ name: three_pks_view\n" +
+			"     ├─ outerVisibility: false\n" +
+			"     ├─ isLateral: false\n" +
+			"     ├─ cacheable: true\n" +
+			"     ├─ colSet: (4-6)\n" +
+			"     ├─ tableId: 3\n" +
+			"     └─ IndexedTableAccess(three_pks)\n" +
+			"         ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"         ├─ static: [{[1, 1], [1, 1], [1, 1]}]\n" +
+			"         ├─ colSet: (1-3)\n" +
+			"         ├─ tableId: 1\n" +
+			"         └─ Table\n" +
+			"             ├─ name: three_pks\n" +
+			"             └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+		ExpectedEstimates: "SubqueryAlias\n" +
+			" ├─ name: view_in_view\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (7-9)\n" +
+			" ├─ tableId: 5\n" +
+			" └─ SubqueryAlias\n" +
+			"     ├─ name: three_pks_view\n" +
+			"     ├─ outerVisibility: false\n" +
+			"     ├─ isLateral: false\n" +
+			"     ├─ cacheable: true\n" +
+			"     ├─ colSet: (4-6)\n" +
+			"     ├─ tableId: 3\n" +
+			"     └─ IndexedTableAccess(three_pks)\n" +
+			"         ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"         ├─ filters: [{[1, 1], [1, 1], [1, 1]}]\n" +
+			"         └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+		ExpectedAnalysis: "SubqueryAlias\n" +
+			" ├─ name: view_in_view\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (7-9)\n" +
+			" ├─ tableId: 5\n" +
+			" └─ SubqueryAlias\n" +
+			"     ├─ name: three_pks_view\n" +
+			"     ├─ outerVisibility: false\n" +
+			"     ├─ isLateral: false\n" +
+			"     ├─ cacheable: true\n" +
+			"     ├─ colSet: (4-6)\n" +
+			"     ├─ tableId: 3\n" +
+			"     └─ IndexedTableAccess(three_pks)\n" +
+			"         ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"         ├─ filters: [{[1, 1], [1, 1], [1, 1]}]\n" +
+			"         └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+	},
+	{
+		Query: `select * from projection_view_in_view where pk = 1;`,
+		ExpectedPlan: "Project\n" +
+			" ├─ columns: [projection_view_in_view.pk:0!null]\n" +
+			" └─ SubqueryAlias\n" +
+			"     ├─ name: projection_view_in_view\n" +
+			"     ├─ outerVisibility: false\n" +
+			"     ├─ isLateral: false\n" +
+			"     ├─ cacheable: true\n" +
+			"     ├─ colSet: (9)\n" +
+			"     ├─ tableId: 5\n" +
+			"     └─ Project\n" +
+			"         ├─ columns: [three_pks_projection_view.pk2:1!null->pk:0]\n" +
+			"         └─ SubqueryAlias\n" +
+			"             ├─ name: three_pks_projection_view\n" +
+			"             ├─ outerVisibility: false\n" +
+			"             ├─ isLateral: false\n" +
+			"             ├─ cacheable: true\n" +
+			"             ├─ colSet: (6,7)\n" +
+			"             ├─ tableId: 3\n" +
+			"             └─ Project\n" +
+			"                 ├─ columns: [three_pks.pk2:1!null->pk1:0, three_pks.pk3:2!null->pk2:0]\n" +
+			"                 └─ IndexedTableAccess(three_pks)\n" +
+			"                     ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"                     ├─ static: [{[1, 1], [1, 1], [1, 1]}]\n" +
+			"                     ├─ colSet: (1-3)\n" +
+			"                     ├─ tableId: 1\n" +
+			"                     └─ Table\n" +
+			"                         ├─ name: three_pks\n" +
+			"                         └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+		ExpectedEstimates: "Project\n" +
+			" ├─ columns: [projection_view_in_view.pk]\n" +
+			" └─ SubqueryAlias\n" +
+			"     ├─ name: projection_view_in_view\n" +
+			"     ├─ outerVisibility: false\n" +
+			"     ├─ isLateral: false\n" +
+			"     ├─ cacheable: true\n" +
+			"     ├─ colSet: (9)\n" +
+			"     ├─ tableId: 5\n" +
+			"     └─ Project\n" +
+			"         ├─ columns: [three_pks_projection_view.pk2 as pk]\n" +
+			"         └─ SubqueryAlias\n" +
+			"             ├─ name: three_pks_projection_view\n" +
+			"             ├─ outerVisibility: false\n" +
+			"             ├─ isLateral: false\n" +
+			"             ├─ cacheable: true\n" +
+			"             ├─ colSet: (6,7)\n" +
+			"             ├─ tableId: 3\n" +
+			"             └─ Project\n" +
+			"                 ├─ columns: [three_pks.pk2 as pk1, three_pks.pk3 as pk2]\n" +
+			"                 └─ IndexedTableAccess(three_pks)\n" +
+			"                     ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"                     ├─ filters: [{[1, 1], [1, 1], [1, 1]}]\n" +
+			"                     └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+		ExpectedAnalysis: "Project\n" +
+			" ├─ columns: [projection_view_in_view.pk]\n" +
+			" └─ SubqueryAlias\n" +
+			"     ├─ name: projection_view_in_view\n" +
+			"     ├─ outerVisibility: false\n" +
+			"     ├─ isLateral: false\n" +
+			"     ├─ cacheable: true\n" +
+			"     ├─ colSet: (9)\n" +
+			"     ├─ tableId: 5\n" +
+			"     └─ Project\n" +
+			"         ├─ columns: [three_pks_projection_view.pk2 as pk]\n" +
+			"         └─ SubqueryAlias\n" +
+			"             ├─ name: three_pks_projection_view\n" +
+			"             ├─ outerVisibility: false\n" +
+			"             ├─ isLateral: false\n" +
+			"             ├─ cacheable: true\n" +
+			"             ├─ colSet: (6,7)\n" +
+			"             ├─ tableId: 3\n" +
+			"             └─ Project\n" +
+			"                 ├─ columns: [three_pks.pk2 as pk1, three_pks.pk3 as pk2]\n" +
+			"                 └─ IndexedTableAccess(three_pks)\n" +
+			"                     ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"                     ├─ filters: [{[1, 1], [1, 1], [1, 1]}]\n" +
+			"                     └─ columns: [pk1 pk2 pk3]\n" +
+			"",
+	},
+	{
+		Query: `select * from (select l.pk1 as left_pk, r.pk1 as right_pk from three_pk l join three_pk r) alias where left_pk = 1 and right_pk = 2;`,
+		ExpectedPlan: "SubqueryAlias\n" +
+			" ├─ name: alias\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (19,20)\n" +
+			" ├─ tableId: 3\n" +
+			" └─ Project\n" +
+			"     ├─ columns: [l.pk1:1!null->left_pk:0, r.pk1:0!null->right_pk:0]\n" +
+			"     └─ CrossJoin\n" +
+			"         ├─ TableAlias(r)\n" +
+			"         │   └─ IndexedTableAccess(three_pk)\n" +
+			"         │       ├─ index: [three_pk.pk1,three_pk.pk2,three_pk.pk3]\n" +
+			"         │       ├─ static: [{[2, 2], [NULL, ∞), [NULL, ∞)}]\n" +
+			"         │       ├─ colSet: (9-16)\n" +
+			"         │       ├─ tableId: 2\n" +
+			"         │       └─ Table\n" +
+			"         │           ├─ name: three_pk\n" +
+			"         │           └─ columns: [pk1]\n" +
+			"         └─ TableAlias(l)\n" +
+			"             └─ IndexedTableAccess(three_pk)\n" +
+			"                 ├─ index: [three_pk.pk1,three_pk.pk2,three_pk.pk3]\n" +
+			"                 ├─ static: [{[1, 1], [NULL, ∞), [NULL, ∞)}]\n" +
+			"                 ├─ colSet: (1-8)\n" +
+			"                 ├─ tableId: 1\n" +
+			"                 └─ Table\n" +
+			"                     ├─ name: three_pk\n" +
+			"                     └─ columns: [pk1]\n" +
+			"",
+		ExpectedEstimates: "SubqueryAlias\n" +
+			" ├─ name: alias\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (19,20)\n" +
+			" ├─ tableId: 3\n" +
+			" └─ Project\n" +
+			"     ├─ columns: [l.pk1 as left_pk, r.pk1 as right_pk]\n" +
+			"     └─ CrossJoin (estimated cost=5.040 rows=2)\n" +
+			"         ├─ TableAlias(r)\n" +
+			"         │   └─ IndexedTableAccess(three_pk)\n" +
+			"         │       ├─ index: [three_pk.pk1,three_pk.pk2,three_pk.pk3]\n" +
+			"         │       ├─ filters: [{[2, 2], [NULL, ∞), [NULL, ∞)}]\n" +
+			"         │       └─ columns: [pk1]\n" +
+			"         └─ TableAlias(l)\n" +
+			"             └─ IndexedTableAccess(three_pk)\n" +
+			"                 ├─ index: [three_pk.pk1,three_pk.pk2,three_pk.pk3]\n" +
+			"                 ├─ filters: [{[1, 1], [NULL, ∞), [NULL, ∞)}]\n" +
+			"                 └─ columns: [pk1]\n" +
+			"",
+		ExpectedAnalysis: "SubqueryAlias\n" +
+			" ├─ name: alias\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (19,20)\n" +
+			" ├─ tableId: 3\n" +
+			" └─ Project\n" +
+			"     ├─ columns: [l.pk1 as left_pk, r.pk1 as right_pk]\n" +
+			"     └─ CrossJoin (estimated cost=5.040 rows=2) (actual rows=0 loops=1)\n" +
+			"         ├─ TableAlias(r)\n" +
+			"         │   └─ IndexedTableAccess(three_pk)\n" +
+			"         │       ├─ index: [three_pk.pk1,three_pk.pk2,three_pk.pk3]\n" +
+			"         │       ├─ filters: [{[2, 2], [NULL, ∞), [NULL, ∞)}]\n" +
+			"         │       └─ columns: [pk1]\n" +
+			"         └─ TableAlias(l)\n" +
+			"             └─ IndexedTableAccess(three_pk)\n" +
+			"                 ├─ index: [three_pk.pk1,three_pk.pk2,three_pk.pk3]\n" +
+			"                 ├─ filters: [{[1, 1], [NULL, ∞), [NULL, ∞)}]\n" +
+			"                 └─ columns: [pk1]\n" +
+			"",
+	},
+	{
+		Query: `select * from (select l.left_pk as left_left, l.right_pk as left_right, r.left_pk as right_left, r.right_pk as right_right from join_view_requires_prefix l join join_view_requires_prefix r) alias where left_left = 1 and left_right = 2 and right_left = 3 and right_right = 4;`,
+		ExpectedPlan: "SubqueryAlias\n" +
+			" ├─ name: alias\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (25-28)\n" +
+			" ├─ tableId: 9\n" +
+			" └─ Project\n" +
+			"     ├─ columns: [l.left_pk:0!null->left_left:0, l.right_pk:1!null->left_right:0, r.left_pk:2!null->right_left:0, r.right_pk:3!null->right_right:0]\n" +
+			"     └─ CrossHashJoin\n" +
+			"         ├─ SubqueryAlias\n" +
+			"         │   ├─ name: l\n" +
+			"         │   ├─ outerVisibility: false\n" +
+			"         │   ├─ isLateral: false\n" +
+			"         │   ├─ cacheable: true\n" +
+			"         │   ├─ colSet: (9,10)\n" +
+			"         │   ├─ tableId: 4\n" +
+			"         │   └─ Project\n" +
+			"         │       ├─ columns: [l.pk1:2!null->left_pk:0, r.pk1:0!null->right_pk:0]\n" +
+			"         │       └─ InnerJoin\n" +
+			"         │           ├─ Eq\n" +
+			"         │           │   ├─ l.pk2:3!null\n" +
+			"         │           │   └─ r.pk2:1!null\n" +
+			"         │           ├─ TableAlias(r)\n" +
+			"         │           │   └─ IndexedTableAccess(three_pks)\n" +
+			"         │           │       ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"         │           │       ├─ static: [{[2, 2], [NULL, ∞), [NULL, ∞)}]\n" +
+			"         │           │       ├─ colSet: (4-6)\n" +
+			"         │           │       ├─ tableId: 2\n" +
+			"         │           │       └─ Table\n" +
+			"         │           │           ├─ name: three_pks\n" +
+			"         │           │           └─ columns: [pk1 pk2]\n" +
+			"         │           └─ TableAlias(l)\n" +
+			"         │               └─ IndexedTableAccess(three_pks)\n" +
+			"         │                   ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"         │                   ├─ static: [{[1, 1], [NULL, ∞), [NULL, ∞)}]\n" +
+			"         │                   ├─ colSet: (1-3)\n" +
+			"         │                   ├─ tableId: 1\n" +
+			"         │                   └─ Table\n" +
+			"         │                       ├─ name: three_pks\n" +
+			"         │                       └─ columns: [pk1 pk2]\n" +
+			"         └─ HashLookup\n" +
+			"             ├─ left-key: TUPLE()\n" +
+			"             ├─ right-key: TUPLE()\n" +
+			"             └─ CachedResults\n" +
+			"                 └─ SubqueryAlias\n" +
+			"                     ├─ name: r\n" +
+			"                     ├─ outerVisibility: false\n" +
+			"                     ├─ isLateral: false\n" +
+			"                     ├─ cacheable: true\n" +
+			"                     ├─ colSet: (19,20)\n" +
+			"                     ├─ tableId: 8\n" +
+			"                     └─ Project\n" +
+			"                         ├─ columns: [l.pk1:2!null->left_pk:0, r.pk1:0!null->right_pk:0]\n" +
+			"                         └─ InnerJoin\n" +
+			"                             ├─ Eq\n" +
+			"                             │   ├─ l.pk2:3!null\n" +
+			"                             │   └─ r.pk2:1!null\n" +
+			"                             ├─ TableAlias(r)\n" +
+			"                             │   └─ IndexedTableAccess(three_pks)\n" +
+			"                             │       ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"                             │       ├─ static: [{[4, 4], [NULL, ∞), [NULL, ∞)}]\n" +
+			"                             │       ├─ colSet: (14-16)\n" +
+			"                             │       ├─ tableId: 6\n" +
+			"                             │       └─ Table\n" +
+			"                             │           ├─ name: three_pks\n" +
+			"                             │           └─ columns: [pk1 pk2]\n" +
+			"                             └─ TableAlias(l)\n" +
+			"                                 └─ IndexedTableAccess(three_pks)\n" +
+			"                                     ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"                                     ├─ static: [{[3, 3], [NULL, ∞), [NULL, ∞)}]\n" +
+			"                                     ├─ colSet: (11-13)\n" +
+			"                                     ├─ tableId: 5\n" +
+			"                                     └─ Table\n" +
+			"                                         ├─ name: three_pks\n" +
+			"                                         └─ columns: [pk1 pk2]\n" +
+			"",
+		ExpectedEstimates: "SubqueryAlias\n" +
+			" ├─ name: alias\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (25-28)\n" +
+			" ├─ tableId: 9\n" +
+			" └─ Project\n" +
+			"     ├─ columns: [l.left_pk as left_left, l.right_pk as left_right, r.left_pk as right_left, r.right_pk as right_right]\n" +
+			"     └─ CrossHashJoin (estimated cost=402.250 rows=125)\n" +
+			"         ├─ SubqueryAlias\n" +
+			"         │   ├─ name: l\n" +
+			"         │   ├─ outerVisibility: false\n" +
+			"         │   ├─ isLateral: false\n" +
+			"         │   ├─ cacheable: true\n" +
+			"         │   ├─ colSet: (9,10)\n" +
+			"         │   ├─ tableId: 4\n" +
+			"         │   └─ Project\n" +
+			"         │       ├─ columns: [l.pk1 as left_pk, r.pk1 as right_pk]\n" +
+			"         │       └─ InnerJoin (estimated cost=2.010 rows=1)\n" +
+			"         │           ├─ (l.pk2 = r.pk2)\n" +
+			"         │           ├─ TableAlias(r)\n" +
+			"         │           │   └─ IndexedTableAccess(three_pks)\n" +
+			"         │           │       ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"         │           │       ├─ filters: [{[2, 2], [NULL, ∞), [NULL, ∞)}]\n" +
+			"         │           │       └─ columns: [pk1 pk2]\n" +
+			"         │           └─ TableAlias(l)\n" +
+			"         │               └─ IndexedTableAccess(three_pks)\n" +
+			"         │                   ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"         │                   ├─ filters: [{[1, 1], [NULL, ∞), [NULL, ∞)}]\n" +
+			"         │                   └─ columns: [pk1 pk2]\n" +
+			"         └─ HashLookup\n" +
+			"             ├─ left-key: ()\n" +
+			"             ├─ right-key: ()\n" +
+			"             └─ CachedResults\n" +
+			"                 └─ SubqueryAlias\n" +
+			"                     ├─ name: r\n" +
+			"                     ├─ outerVisibility: false\n" +
+			"                     ├─ isLateral: false\n" +
+			"                     ├─ cacheable: true\n" +
+			"                     └─ Project\n" +
+			"                         ├─ columns: [l.pk1 as left_pk, r.pk1 as right_pk]\n" +
+			"                         └─ InnerJoin\n" +
+			"                             ├─ (l.pk2 = r.pk2)\n" +
+			"                             ├─ TableAlias(r)\n" +
+			"                             │   └─ IndexedTableAccess(three_pks)\n" +
+			"                             │       ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"                             │       ├─ filters: [{[4, 4], [NULL, ∞), [NULL, ∞)}]\n" +
+			"                             │       └─ columns: [pk1 pk2]\n" +
+			"                             └─ TableAlias(l)\n" +
+			"                                 └─ IndexedTableAccess(three_pks)\n" +
+			"                                     ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"                                     ├─ filters: [{[3, 3], [NULL, ∞), [NULL, ∞)}]\n" +
+			"                                     └─ columns: [pk1 pk2]\n" +
+			"",
+		ExpectedAnalysis: "SubqueryAlias\n" +
+			" ├─ name: alias\n" +
+			" ├─ outerVisibility: false\n" +
+			" ├─ isLateral: false\n" +
+			" ├─ cacheable: true\n" +
+			" ├─ colSet: (25-28)\n" +
+			" ├─ tableId: 9\n" +
+			" └─ Project\n" +
+			"     ├─ columns: [l.left_pk as left_left, l.right_pk as left_right, r.left_pk as right_left, r.right_pk as right_right]\n" +
+			"     └─ CrossHashJoin (estimated cost=402.250 rows=125) (actual rows=0 loops=1)\n" +
+			"         ├─ SubqueryAlias\n" +
+			"         │   ├─ name: l\n" +
+			"         │   ├─ outerVisibility: false\n" +
+			"         │   ├─ isLateral: false\n" +
+			"         │   ├─ cacheable: true\n" +
+			"         │   ├─ colSet: (9,10)\n" +
+			"         │   ├─ tableId: 4\n" +
+			"         │   └─ Project\n" +
+			"         │       ├─ columns: [l.pk1 as left_pk, r.pk1 as right_pk]\n" +
+			"         │       └─ InnerJoin (estimated cost=2.010 rows=1) (actual rows=0 loops=1)\n" +
+			"         │           ├─ (l.pk2 = r.pk2)\n" +
+			"         │           ├─ TableAlias(r)\n" +
+			"         │           │   └─ IndexedTableAccess(three_pks)\n" +
+			"         │           │       ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"         │           │       ├─ filters: [{[2, 2], [NULL, ∞), [NULL, ∞)}]\n" +
+			"         │           │       └─ columns: [pk1 pk2]\n" +
+			"         │           └─ TableAlias(l)\n" +
+			"         │               └─ IndexedTableAccess(three_pks)\n" +
+			"         │                   ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"         │                   ├─ filters: [{[1, 1], [NULL, ∞), [NULL, ∞)}]\n" +
+			"         │                   └─ columns: [pk1 pk2]\n" +
+			"         └─ HashLookup\n" +
+			"             ├─ left-key: ()\n" +
+			"             ├─ right-key: ()\n" +
+			"             └─ CachedResults\n" +
+			"                 └─ SubqueryAlias\n" +
+			"                     ├─ name: r\n" +
+			"                     ├─ outerVisibility: false\n" +
+			"                     ├─ isLateral: false\n" +
+			"                     ├─ cacheable: true\n" +
+			"                     └─ Project\n" +
+			"                         ├─ columns: [l.pk1 as left_pk, r.pk1 as right_pk]\n" +
+			"                         └─ InnerJoin\n" +
+			"                             ├─ (l.pk2 = r.pk2)\n" +
+			"                             ├─ TableAlias(r)\n" +
+			"                             │   └─ IndexedTableAccess(three_pks)\n" +
+			"                             │       ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"                             │       ├─ filters: [{[4, 4], [NULL, ∞), [NULL, ∞)}]\n" +
+			"                             │       └─ columns: [pk1 pk2]\n" +
+			"                             └─ TableAlias(l)\n" +
+			"                                 └─ IndexedTableAccess(three_pks)\n" +
+			"                                     ├─ index: [three_pks.pk1,three_pks.pk2,three_pks.pk3]\n" +
+			"                                     ├─ filters: [{[3, 3], [NULL, ∞), [NULL, ∞)}]\n" +
+			"                                     └─ columns: [pk1 pk2]\n" +
 			"",
 	},
 }

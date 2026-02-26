@@ -801,6 +801,61 @@ on w = 0;`,
 		Query:    "select * from comp_index_t0 a join comp_index_t0 b join comp_index_t0 c on a.v2 = b.pk and b.v2 = c.pk and c.v2 = 5",
 		Expected: []sql.Row{},
 	},
+	{
+		Query: "select * from mytable join othertable on 3 >= 2 where mytable.i = 1 order by othertable.i2",
+		Expected: []sql.Row{
+			{1, "first row", "third", 1},
+			{1, "first row", "second", 2},
+			{1, "first row", "first", 3},
+		},
+	},
+	{
+		Query:    "select * from mytable join othertable on 3 < 2",
+		Expected: []sql.Row{},
+	},
+	{
+		Query: "select * from mytable left join emptytable on 3 >= 2",
+		Expected: []sql.Row{
+			{1, "first row", nil, nil},
+			{2, "second row", nil, nil},
+			{3, "third row", nil, nil},
+		},
+	},
+	{
+		Query: "select * from mytable left join othertable on 3 < 2",
+		Expected: []sql.Row{
+			{1, "first row", nil, nil},
+			{2, "second row", nil, nil},
+			{3, "third row", nil, nil},
+		},
+	},
+	{
+		Query: "select * from emptytable right join mytable on 3 >= 2",
+		Expected: []sql.Row{
+			{nil, nil, 1, "first row"},
+			{nil, nil, 2, "second row"},
+			{nil, nil, 3, "third row"},
+		},
+	},
+	{
+		Query: "select * from othertable right join mytable on 3 < 2",
+		Expected: []sql.Row{
+			{nil, nil, 1, "first row"},
+			{nil, nil, 2, "second row"},
+			{nil, nil, 3, "third row"},
+		},
+	},
+	{
+		Query: "select * from mytable full outer join othertable on 3 < 2",
+		Expected: []sql.Row{
+			{1, "first row", nil, nil},
+			{2, "second row", nil, nil},
+			{3, "third row", nil, nil},
+			{nil, nil, "first", 3},
+			{nil, nil, "second", 2},
+			{nil, nil, "third", 1},
+		},
+	},
 }
 
 var JoinScriptTests = []ScriptTest{
@@ -1243,6 +1298,117 @@ var JoinScriptTests = []ScriptTest{
 			},
 		},
 	},
+	{
+		// https://github.com/dolthub/dolt/issues/10268
+		// https://github.com/dolthub/dolt/issues/10295
+		// TODO: when natural full join has been implemented, move this to join_op_tests
+		Name: "natural full join",
+		SetUpScript: []string{
+			"CREATE TABLE t0(c0 BOOLEAN, c1 INT, PRIMARY KEY(c0));",
+			"CREATE TABLE t1(c0 BOOLEAN, c1 VARCHAR(500), PRIMARY KEY(c0));",
+			"INSERT INTO t1(c1, c0) VALUES (NULL, true);",
+			"INSERT INTO t0(c0, c1) VALUES (true, 4);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				// https://github.com/dolthub/dolt/issues/10295
+				Skip:  true,
+				Query: "SELECT * FROM t1 NATURAL FULL JOIN t0;",
+				Expected: []sql.Row{
+					{1, 4},
+					{1, nil},
+				},
+			},
+			{
+				Query:          "SELECT * FROM t1 NATURAL FULL JOIN t0;",
+				ExpectedErrStr: "unknown using join type: natural full join",
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10284
+		Name: "join when range bounds are the same field",
+		SetUpScript: []string{
+			"CREATE TABLE t0(c0 VARCHAR(500) , c1 VARCHAR(500) , c2 VARCHAR(500));",
+			"CREATE TABLE t1(c0 INT, c1 VARCHAR(500));",
+			"INSERT INTO t0(c0, c1) VALUES (1, 5);",
+			"INSERT INTO t0(c2) VALUES ('KZ');",
+			"INSERT INTO t1(c0) VALUES (false);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "SELECT * FROM t1 INNER  JOIN t0 ON (t1.c0 BETWEEN t0.c2 AND t0.c2);",
+				Expected: []sql.Row{{0, nil, nil, nil, "KZ"}},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10304
+		Name: "3-way join with 1 primary key table, 2 keyless tables, and join filter on keyless tables",
+		SetUpScript: []string{
+			"CREATE TABLE t0(c0 VARCHAR(500), c1 INT);",
+			"CREATE TABLE t6(t6c0 VARCHAR(500), t6c1 INT, PRIMARY KEY(t6c0));",
+			"CREATE VIEW v0(c0) AS SELECT t0.c1 FROM t0;",
+			"create table t1(c0 int)",
+			"INSERT INTO t6(t6c0) VALUES (3);",
+			"INSERT INTO t6(t6c0, t6c1) VALUES (2, '-1'), ('', '1');",
+			"INSERT INTO t6(t6c0, t6c1) VALUES (true, 0);",
+			"INSERT INTO t0(c0, c1) VALUES (-1, false);",
+			"INSERT INTO t0(c1) VALUES (-7);",
+			"insert into t1(c0) values (-7),(0)",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: "SELECT * FROM t6, t1 INNER JOIN t0 ON ((t1.c0)<=>(t0.c1));",
+				Expected: []sql.Row{
+					{"", 1, -7, nil, -7},
+					{"", 1, 0, "-1", 0},
+					{"1", 0, -7, nil, -7},
+					{"1", 0, 0, "-1", 0},
+					{"2", -1, -7, nil, -7},
+					{"2", -1, 0, "-1", 0},
+					{"3", nil, -7, nil, -7},
+					{"3", nil, 0, "-1", 0},
+				},
+			},
+			{
+				Query: "SELECT * FROM t6, v0 INNER JOIN t0 ON ((v0.c0)<=>(t0.c1));",
+				Expected: []sql.Row{
+					{"", 1, -7, nil, -7},
+					{"", 1, 0, "-1", 0},
+					{"1", 0, -7, nil, -7},
+					{"1", 0, 0, "-1", 0},
+					{"2", -1, -7, nil, -7},
+					{"2", -1, 0, "-1", 0},
+					{"3", nil, -7, nil, -7},
+					{"3", nil, 0, "-1", 0},
+				},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/10434
+		Name: "Correct exec indexes are assigned for left join on empty table",
+		SetUpScript: []string{
+			"CREATE  TABLE  t4(c1 BOOLEAN, PRIMARY KEY(c1));",
+			"CREATE  TABLE  t0(c0 INT);",
+			"CREATE table t1 AS SELECT 1;",
+			"CREATE VIEW v0(c0) AS SELECT 1;",
+			"INSERT INTO t0(c0) VALUES (1);",
+			"insert into t4(c1) values (false)",
+			"SELECT * FROM t1, t0 LEFT JOIN t4 ON FALSE;",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "select * from t1, t0 left join t4 on false;",
+				Expected: []sql.Row{{1, 1, nil}},
+			},
+			{
+				Query:    "select * from t1, t0 left join t4 on false;",
+				Expected: []sql.Row{{1, 1, nil}},
+			},
+		},
+	},
 }
 
 var LateralJoinScriptTests = []ScriptTest{
@@ -1472,6 +1638,94 @@ LATERAL (
 				Query: "SELECT t2.c0, t2.c1, t2.c2 FROM t2 FULL OUTER JOIN t3 ON LEFT(t2.c1, 2) = t2.c1 CROSS JOIN (SELECT t1.c0 AS c0 FROM t1) AS vtable0;",
 				// TODO: possible type mismatch; 1 should be true
 				Expected: []sql.Row{{5, "ao", 1}},
+			},
+		},
+	},
+	{
+		Name: "nested lateral joins",
+		SetUpScript: []string{
+			"CREATE table ab (a int primary key, b int);",
+			"insert into ab values (0,3), (1,2), (2,1), (3,0);",
+			"create table three_pk (pk1 tinyint, pk2 tinyint, pk3 tinyint, col tinyint, primary key (pk1, pk2))",
+			"insert into three_pk values (0,0,0,100), (0,1,1,101), (1,0,1,110), (1,1,0,111)",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: `select * from ab ab1 join lateral (select * from ab ab2 join lateral (select * from three_pk where pk1 = ab1.a and pk2 = ab2.a) inner1) inner2;`,
+				Expected: []sql.Row{
+					{0, 3, 0, 3, 0, 0, 0, 100},
+					{0, 3, 1, 2, 0, 1, 1, 101},
+					{1, 2, 0, 3, 1, 0, 1, 110},
+					{1, 2, 1, 2, 1, 1, 0, 111},
+				},
+			},
+			{
+				Query: `select * from ab ab1 join lateral (select * from ab ab2 join lateral (select * from ab ab3 join lateral (select * from three_pk where pk1 = ab1.a and pk2 = ab2.a and pk3 = ab3.a) inner1) inner2) inner3;`,
+				Expected: []sql.Row{
+					{0, 3, 0, 3, 0, 3, 0, 0, 0, 100},
+					{0, 3, 1, 2, 1, 2, 0, 1, 1, 101},
+					{1, 2, 0, 3, 1, 2, 1, 0, 1, 110},
+					{1, 2, 1, 2, 0, 3, 1, 1, 0, 111},
+				},
+			},
+			{
+				Query: `select * from ab ab1 join lateral (select * from ab ab2 join lateral (select col < ab1.b from ab ab3 join three_pk where pk1 = ab1.a and pk2 = ab2.a and pk3 = ab3.a) inner2) inner3;`,
+				Expected: []sql.Row{
+					{0, 3, 0, 3, false},
+					{0, 3, 1, 2, false},
+					{1, 2, 0, 3, false},
+					{1, 2, 1, 2, false},
+				},
+			},
+			{
+				Query: `select * from ab ab1 where exists (select * from ab ab2 where exists (select * from three_pk where pk1 = ab1.a and pk2 = ab2.a));`,
+				Expected: []sql.Row{
+					{0, 3},
+					{1, 2},
+				},
+			},
+			{
+				Query: `select * from ab ab1 where exists (select * from ab ab2 where exists (select * from ab ab3 where exists (select * from three_pk where pk1 = ab1.a and pk2 = ab2.a and pk3 = ab3.a)));`,
+				Expected: []sql.Row{
+					{0, 3},
+					{1, 2},
+				},
+			},
+		},
+	},
+	{
+		Name: "non-lateral joins inside inside lateral join",
+		SetUpScript: []string{
+			"CREATE table ab (a int primary key);",
+			"insert into ab values (0), (1), (2);",
+			"create table three_pk (pk1 tinyint, pk2 tinyint, pk3 tinyint, col tinyint, primary key (pk1, pk2))",
+			"insert into three_pk values (0,0,0,100), (0,1,1,101), (1,0,1,110), (1,1,0,111)",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: `
+select *
+from three_pk outer_table join lateral (
+    select /*+ JOIN_ORDER(inner1, inner2, inner3) */ *
+    from three_pk inner1 join (three_pk inner2 join three_pk inner3
+        on outer_table.pk2 = inner2.pk1 and outer_table.pk2 = inner2.pk2
+       and outer_table.pk3 = inner3.pk1 and outer_table.pk3 = inner3.pk2)
+        on outer_table.pk1 = inner1.pk1 and outer_table.pk1 = inner1.pk2
+) inner_join;`,
+				Expected: []sql.Row{
+					{0, 0, 0, 100, 0, 0, 0, 100, 0, 0, 0, 100, 0, 0, 0, 100},
+					{0, 1, 1, 101, 0, 0, 0, 100, 1, 1, 0, 111, 1, 1, 0, 111},
+					{1, 0, 1, 110, 1, 1, 0, 111, 0, 0, 0, 100, 1, 1, 0, 111},
+					{1, 1, 0, 111, 1, 1, 0, 111, 1, 1, 0, 111, 0, 0, 0, 100},
+				},
+			},
+			{
+				Query: `select ab1.a, a2 from ab ab1 join lateral (select ab2.a as a2, ab3.a as a3 from ab ab2 full outer join ab ab3 on ab2.a = ab1.a) inner1 where a3 is null;`,
+				Expected: []sql.Row{
+					{0, 1}, {0, 2},
+					{1, 0}, {1, 2},
+					{2, 0}, {2, 1},
+				},
 			},
 		},
 	},

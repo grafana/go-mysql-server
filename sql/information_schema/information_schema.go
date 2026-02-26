@@ -1951,7 +1951,9 @@ func triggersRowIter(ctx *Context, c Catalog) (RowIter, error) {
 				ctx.SetCurrentDatabase(db.Database.Name())
 				triggerSqlMode := NewSqlModeFromString(trigger.SqlMode)
 				// TODO: figure out how auth works in this case
-				parsedTrigger, _, err := planbuilder.ParseWithOptions(ctx, c, trigger.CreateStatement, triggerSqlMode.ParserOptions())
+				builder := planbuilder.New(ctx, c, nil)
+				builder.SetParserOptions(triggerSqlMode.ParserOptions())
+				parsedTrigger, _, _, _, err := builder.Parse(trigger.CreateStatement, nil, false)
 				if err != nil {
 					return nil, err
 				}
@@ -2137,6 +2139,10 @@ func userPrivilegesRowIter(ctx *Context, catalog Catalog) (RowIter, error) {
 func emptyRowIter(ctx *Context, c Catalog) (RowIter, error) {
 	return RowsToRowIter(), nil
 }
+
+// NewInformationSchemaTablesToAdd is used by Doltgres to inject Postgres-specific
+// tables and views. In Dolt, this just returns empty map.
+var NewInformationSchemaTablesToAdd = map[string]Table{}
 
 func GetInformationSchemaTables() map[string]Table {
 	return map[string]Table{
@@ -2525,6 +2531,12 @@ func NewInformationSchemaDatabase() Database {
 	}
 
 	isDb.tables[StatisticsTableName] = NewDefaultStats()
+
+	// It's for Doltgres-only tables.
+	// It should be empty map for Dolt.
+	for tn, tbl := range NewInformationSchemaTablesToAdd {
+		isDb.tables[tn] = tbl
+	}
 
 	return isDb
 }

@@ -26,8 +26,8 @@ import (
 func (b *BaseBuilder) buildNodeExec(ctx *sql.Context, n sql.Node, row sql.Row) (sql.RowIter, error) {
 	var iter sql.RowIter
 	var err error
-	if b.override != nil {
-		iter, err = b.override.Build(ctx, n, row)
+	if b.PriorityBuilder != nil {
+		iter, err = b.PriorityBuilder.Build(ctx, n, row)
 	}
 	if err != nil {
 		return nil, err
@@ -64,6 +64,8 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 		return b.buildUpdateHistogram(ctx, n, row)
 	case *plan.DropHistogram:
 		return b.buildDropHistogram(ctx, n, row)
+	case *plan.Binlog:
+		return b.buildBinlog(ctx, n, row)
 	case *plan.ShowBinlogs:
 		return b.buildShowBinlogs(ctx, n, row)
 	case *plan.ShowBinlogStatus:
@@ -146,6 +148,8 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 		return b.buildRenameColumn(ctx, n, row)
 	case *plan.DropDB:
 		return b.buildDropDB(ctx, n, row)
+	case *plan.DropSchema:
+		return b.buildDropSchema(ctx, n, row)
 	case *plan.Distinct:
 		return b.buildDistinct(ctx, n, row)
 	case *plan.Having:
@@ -322,8 +326,6 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 		return b.buildLoadData(ctx, n, row)
 	case *plan.ShowCharset:
 		return b.buildShowCharset(ctx, n, row)
-	case *plan.StripRowNode:
-		return b.buildStripRowNode(ctx, n, row)
 	case *plan.DropConstraint:
 		return b.buildDropConstraint(ctx, n, row)
 	case *plan.FlushPrivileges:
@@ -376,13 +378,18 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 		return b.buildHashLookup(ctx, n, row)
 	case *plan.Iterate:
 		return b.buildIterate(ctx, n, row)
-	case sql.ExecSourceRel:
-		// escape hatch for custom data sources
-		return n.RowIter(ctx, row)
 	case *plan.CreateSpatialRefSys:
 		return b.buildCreateSpatialRefSys(ctx, n, row)
 	case *plan.RenameForeignKey:
 		return b.buildRenameForeignKey(ctx, n, row)
+	case sql.ExecBuilderNode:
+		// Escape hatch for custom node types implemented outside this package.
+		return n.BuildRowIter(ctx, b, row)
+	case sql.ExecSourceRel:
+		// Catch-all for nodes that implement their own RowIter method not represented above.
+		// All nodes defined in go-mysql-server should be present in the switch above, but not all have been migrated
+		// here yet.
+		return n.RowIter(ctx, row)
 	default:
 		return nil, fmt.Errorf("exec builder found unknown Node type %T", n)
 	}

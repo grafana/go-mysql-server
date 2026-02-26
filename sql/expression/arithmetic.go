@@ -114,7 +114,8 @@ func (a *Arithmetic) DebugString() string {
 
 // IsNullable implements the sql.Expression interface.
 func (a *Arithmetic) IsNullable() bool {
-	if types.IsDatetimeType(a.Type()) || types.IsTimestampType(a.Type()) {
+	typ := a.Type()
+	if types.IsDatetimeType(typ) || types.IsTimestampType(typ) {
 		return true
 	}
 
@@ -440,6 +441,13 @@ func convertValueToType(ctx *sql.Context, typ sql.Type, val interface{}, isTimeT
 		// the value is interpreted as 0, but we need to match the type of the other valid value
 		// to avoid additional conversion, the nil value is handled in each operation
 	}
+	if types.IsTime(typ) {
+		time, ok := cval.(time.Time)
+		if !ok || time.Equal(types.ZeroTime) {
+			ctx.Warn(1292, "Incorrect datetime value: '%s'", val)
+			return nil
+		}
+	}
 	return cval
 }
 
@@ -462,6 +470,9 @@ func convertTimeTypeToString(val interface{}) interface{} {
 }
 
 func plus(lval, rval interface{}) (interface{}, error) {
+	if lval == nil || rval == nil {
+		return nil, nil
+	}
 	switch l := lval.(type) {
 	case uint8:
 		switch r := rval.(type) {
@@ -536,6 +547,9 @@ func plus(lval, rval interface{}) (interface{}, error) {
 }
 
 func minus(lval, rval interface{}) (interface{}, error) {
+	if lval == nil || rval == nil {
+		return nil, nil
+	}
 	switch l := lval.(type) {
 	case uint8:
 		switch r := rval.(type) {
@@ -668,7 +682,7 @@ func mult(lval, rval interface{}) (interface{}, error) {
 
 // UnaryMinus is an unary minus operator.
 type UnaryMinus struct {
-	UnaryExpression
+	UnaryExpressionStub
 }
 
 var _ sql.Expression = (*UnaryMinus)(nil)
@@ -676,7 +690,7 @@ var _ sql.CollationCoercible = (*UnaryMinus)(nil)
 
 // NewUnaryMinus creates a new UnaryMinus expression node.
 func NewUnaryMinus(child sql.Expression) *UnaryMinus {
-	return &UnaryMinus{UnaryExpression{Child: child}}
+	return &UnaryMinus{UnaryExpressionStub{Child: child}}
 }
 
 // Eval implements the sql.Expression interface.
