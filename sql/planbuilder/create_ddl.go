@@ -61,7 +61,7 @@ func (b *Builder) buildCreateTrigger(inScope *scope, subQuery string, fullQuery 
 	}()
 
 	tableName := strings.ToLower(c.Table.Name.String())
-	tableScope, ok := b.buildResolvedTableForTablename(inScope, c.Table, nil)
+	tableScope, ok := b.buildResolvedTableForTablename(inScope, c.Table, nil, nil)
 	if !ok {
 		b.handleErr(sql.ErrTableNotFound.New(tableName))
 	}
