@@ -737,7 +737,7 @@ func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, as
 		if ht, ok := tab.(sql.DatasourceHintedTable); ok {
 			hints := make(map[string]string, len(dsHints.Hints))
 			for _, h := range dsHints.Hints {
-				hints[h.Name] = h.Value
+				hints[strings.ToUpper(h.Name)] = h.Value
 			}
 			tab = ht.WithDatasourceHints(hints)
 		}
