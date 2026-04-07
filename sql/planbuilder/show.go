@@ -136,7 +136,7 @@ func (b *Builder) buildShowTable(inScope *scope, s *ast.Show, showType string) (
 	}
 
 	tableName := strings.ToLower(s.Table.Name.String())
-	tableScope, ok := b.buildResolvedTableForTablename(inScope, s.Table, asOf)
+	tableScope, ok := b.buildResolvedTableForTablename(inScope, s.Table, asOf, nil)
 	if !ok {
 		err := sql.ErrTableNotFound.New(tableName)
 		b.handleErr(err)
@@ -480,7 +480,7 @@ func (b *Builder) buildShowIndex(inScope *scope, s *ast.Show) (outScope *scope) 
 		db = s.Table.DbQualifier.String()
 	}
 
-	tableScope, ok := b.buildResolvedTable(inScope, db, "", s.Table.Name.String(), nil)
+	tableScope, ok := b.buildResolvedTable(inScope, db, "", s.Table.Name.String(), nil, nil)
 	if !ok {
 		err := sql.ErrTableNotFound.New(s.Table.Name.String())
 		b.handleErr(err)
@@ -746,7 +746,7 @@ func (b *Builder) buildShowAllColumns(inScope *scope, s *ast.Show) (outScope *sc
 		schemaName = s.ShowTablesOpt.SchemaName
 	}
 
-	tableScope, ok := b.buildResolvedTable(inScope, dbName, schemaName, s.Table.Name.String(), asOf)
+	tableScope, ok := b.buildResolvedTable(inScope, dbName, schemaName, s.Table.Name.String(), asOf, nil)
 	if !ok {
 		err := sql.ErrTableNotFound.New(s.Table.Name.String())
 		b.handleErr(err)

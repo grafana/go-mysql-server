@@ -121,6 +121,15 @@ type ProjectedTable interface {
 	Projections() []string
 }
 
+// DatasourceHintedTable is a table that can receive per-table datasource
+// execution hints from FOR (...) clauses in SQL. Hints are generic key-value
+// pairs defined by the datasource (e.g. rate('5m'), step('30s'), instant).
+type DatasourceHintedTable interface {
+	Table
+	// WithDatasourceHints returns a new table with the given hints applied.
+	WithDatasourceHints(hints map[string]string) Table
+}
+
 // IndexAddressable is a table that can be scanned through a primary index
 type IndexAddressable interface {
 	// IndexedAccess returns a table that can perform scans constrained to

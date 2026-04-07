@@ -35,7 +35,7 @@ func (b *Builder) buildLoad(inScope *scope, d *ast.Load) (outScope *scope) {
 		dbName = b.ctx.GetCurrentDatabase()
 	}
 
-	destScope, ok := b.buildResolvedTableForTablename(inScope, d.Table, nil)
+	destScope, ok := b.buildResolvedTableForTablename(inScope, d.Table, nil, nil)
 	if !ok {
 		b.handleErr(sql.ErrTableNotFound.New(d.Table.Name.String()))
 	}
