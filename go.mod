@@ -42,3 +42,5 @@ require (
 )
 
 go 1.25.6
+
+replace github.com/dolthub/vitess => /home/kbrandt/go/src/github.com/grafana/vitess

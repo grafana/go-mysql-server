@@ -297,7 +297,7 @@ func (b *Builder) buildDataSource(inScope *scope, te ast.TableExpr) (outScope *s
 				outScope.parent = inScope
 			} else {
 				var ok bool
-				outScope, ok = b.buildTablescan(inScope, e, t.AsOf, t.DsHints)
+				outScope, ok = b.buildTablescan(inScope, e, t.AsOf, t.TableHints)
 				if !ok {
 					b.handleErr(sql.ErrTableNotFound.New(tableName))
 				}
@@ -635,15 +635,15 @@ func (b *Builder) buildJSONTable(inScope *scope, t *ast.JSONTableExpr) (outScope
 	return outScope
 }
 
-func (b *Builder) buildTablescan(inScope *scope, tableName ast.TableName, asof *ast.AsOf, dsHints *ast.DatasourceHints) (outScope *scope, ok bool) {
-	return b.buildResolvedTableForTablename(inScope, tableName, asof, dsHints)
+func (b *Builder) buildTablescan(inScope *scope, tableName ast.TableName, asof *ast.AsOf, tableHints *ast.TableHints) (outScope *scope, ok bool) {
+	return b.buildResolvedTableForTablename(inScope, tableName, asof, tableHints)
 }
 
-func (b *Builder) buildResolvedTableForTablename(inScope *scope, tableName ast.TableName, asof *ast.AsOf, dsHints *ast.DatasourceHints) (outScope *scope, ok bool) {
-	return b.buildResolvedTable(inScope, tableName.DbQualifier.String(), tableName.SchemaQualifier.String(), tableName.Name.String(), asof, dsHints)
+func (b *Builder) buildResolvedTableForTablename(inScope *scope, tableName ast.TableName, asof *ast.AsOf, tableHints *ast.TableHints) (outScope *scope, ok bool) {
+	return b.buildResolvedTable(inScope, tableName.DbQualifier.String(), tableName.SchemaQualifier.String(), tableName.Name.String(), asof, tableHints)
 }
 
-func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, asof *ast.AsOf, dsHints *ast.DatasourceHints) (outScope *scope, ok bool) {
+func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, asof *ast.AsOf, tableHints *ast.TableHints) (outScope *scope, ok bool) {
 	outScope = inScope.push()
 
 	if db == "" {
@@ -733,13 +733,13 @@ func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, as
 		tab = b.buildVirtualTableScan(db, tab)
 	}
 
-	if dsHints != nil && len(dsHints.Hints) > 0 {
-		if ht, ok := tab.(sql.DatasourceHintedTable); ok {
-			hints := make(map[string]string, len(dsHints.Hints))
-			for _, h := range dsHints.Hints {
+	if tableHints != nil && len(tableHints.Hints) > 0 {
+		if ht, ok := tab.(sql.TableHintedTable); ok {
+			hints := make(map[string]string, len(tableHints.Hints))
+			for _, h := range tableHints.Hints {
 				hints[strings.ToUpper(h.Name)] = h.Value
 			}
-			tab = ht.WithDatasourceHints(hints)
+			tab = ht.WithTableHints(hints)
 		}
 	}
 
