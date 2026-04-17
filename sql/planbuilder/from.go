@@ -743,7 +743,7 @@ func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, as
 			}
 			tab = ht.WithTableHints(hints)
 		} else {
-			b.ctx.Warn(0, "table %s does not support FOR (...) hints; hints will be ignored", tab.Name())
+			b.handleErr(fmt.Errorf("table %s does not support FOR (...) hints", tab.Name()))
 		}
 	}
 
