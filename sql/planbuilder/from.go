@@ -737,9 +737,13 @@ func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, as
 		if ht, ok := tab.(sql.TableHintedTable); ok {
 			hints := make(map[string]string, len(tableHints.Hints))
 			for _, h := range tableHints.Hints {
+				// Normalize hint keys to uppercase so downstream consumers
+				// get consistent keys regardless of SQL casing (e.g. rate/RATE/Rate → "RATE").
 				hints[strings.ToUpper(h.Name)] = h.Value
 			}
 			tab = ht.WithTableHints(hints)
+		} else {
+			b.ctx.Warn(0, "table %s does not support FOR (...) hints; hints will be ignored", tab.Name())
 		}
 	}
 
