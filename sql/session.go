@@ -27,6 +27,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/dolthub/go-mysql-server/sql/sqlredact"
 )
 
 type key uint
@@ -281,6 +283,15 @@ type Context struct {
 	interpreted       bool
 	Version           AnalyzerVersion
 	disableFileWrites bool
+	// traceRedactionDisabled, when true, opts the context out of SQL
+	// trace redaction. The zero value (false) means redaction is
+	// enabled — secure-by-default. Toggle with WithTraceRedaction.
+	traceRedactionDisabled bool
+	// redactionMapping is lazily allocated the first time a redaction
+	// helper is called on this context. It captures the original →
+	// token substitution so resolved-name attributes (rowexec spans)
+	// can be redacted with the same tokens as the parsed query.
+	redactionMapping *sqlredact.Mapping
 }
 
 // ContextOption is a function to configure the context.
@@ -356,6 +367,78 @@ func (c *Context) DisableFileWrites() bool {
 		return false
 	}
 	return c.disableFileWrites
+}
+
+// WithTraceRedaction toggles SQL redaction for trace span attributes
+// on this context. The default (no option) is ENABLED — treat trace
+// data as a privacy boundary. Pass WithTraceRedaction(false) only as
+// an explicit opt-out (e.g. for local debugging).
+//
+// Storage is inverted internally so the zero value of the underlying
+// flag corresponds to the secure default.
+func WithTraceRedaction(enabled bool) ContextOption {
+	return func(ctx *Context) {
+		ctx.traceRedactionDisabled = !enabled
+	}
+}
+
+// TraceRedactionEnabled reports whether SQL trace redaction is active
+// for this context. Returns true for nil contexts so callers don't
+// need a separate nil check before reaching for the helper methods.
+func (c *Context) TraceRedactionEnabled() bool {
+	if c == nil {
+		return true
+	}
+	return !c.traceRedactionDisabled
+}
+
+// RedactionMapping returns the per-query redaction mapping, lazily
+// allocating it on first call when redaction is enabled. Returns nil
+// when redaction is disabled — callers should treat that as "use the
+// original strings".
+func (c *Context) RedactionMapping() *sqlredact.Mapping {
+	if c == nil || c.traceRedactionDisabled {
+		return nil
+	}
+	if c.redactionMapping == nil {
+		c.redactionMapping = sqlredact.NewMapping()
+	}
+	return c.redactionMapping
+}
+
+// RedactQueryForTrace returns query in its trace-safe form. When
+// redaction is enabled, it parses the query, populates this context's
+// mapping with the substitutions, and returns the redacted text. On
+// parse failure it returns sqlredact.UnparseableMarker; the parse
+// error itself is intentionally swallowed so trace-attribute callers
+// don't need an error path.
+//
+// When redaction is disabled, the input is returned unchanged.
+func (c *Context) RedactQueryForTrace(query string) string {
+	if c == nil || c.traceRedactionDisabled {
+		return query
+	}
+	redacted, m, _ := sqlredact.RedactSQLForTrace(query)
+	// Replace any prior mapping — a single Context is per-query and
+	// the parse-time mapping is the source of truth for downstream
+	// span attributes.
+	c.redactionMapping = m
+	return redacted
+}
+
+// RedactNameForTrace returns name in its trace-safe form using this
+// context's table-namespace mapping. Tokens are minted on first use,
+// so a name appearing only in a rowexec span (never in the parsed
+// SQL) still gets a stable token. When redaction is disabled, returns
+// the input unchanged.
+func (c *Context) RedactNameForTrace(name string) string {
+	if c == nil || c.traceRedactionDisabled {
+		return name
+	}
+	if c.redactionMapping == nil {
+		c.redactionMapping = sqlredact.NewMapping()
+	}
+	return c.redactionMapping.RedactTable(name)
 }
 
 var ctxNowFunc = time.Now
