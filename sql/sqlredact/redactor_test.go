@@ -198,6 +198,90 @@ func TestRedactSQLForTrace_NoQualifierNoChangeOnEmpty(t *testing.T) {
 	}
 }
 
+func TestRedactSQLForTrace_SelectExprAlias(t *testing.T) {
+	// `SELECT email AS user_email_addr` — the AS name is a ColIdent on
+	// *AliasedExpr; without explicit handling it would render verbatim.
+	sql := "SELECT email AS user_email_addr FROM users"
+	got, _, err := RedactSQLForTrace(sql)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "user_email_addr") {
+		t.Fatalf("SELECT alias leaked: %q", got)
+	}
+	if strings.Contains(got, "email") {
+		t.Fatalf("column name leaked: %q", got)
+	}
+}
+
+func TestRedactSQLForTrace_CTEColumnRename(t *testing.T) {
+	// `WITH x (renamed_col) AS ...` — the column-rename list is
+	// CommonTableExpr.Columns ([]ColIdent); each element is a value
+	// type and only mutable through the *CommonTableExpr pointer.
+	sql := "WITH x (sensitive_renamed_col) AS (SELECT a FROM t) SELECT * FROM x"
+	got, _, err := RedactSQLForTrace(sql)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "sensitive_renamed_col") {
+		t.Fatalf("CTE column rename leaked: %q", got)
+	}
+}
+
+func TestRedactSQLForTrace_JoinUsingColumns(t *testing.T) {
+	// `JOIN b USING (col)` — the Using list lives on
+	// JoinCondition.Using, reachable only through *JoinTableExpr.
+	sql := "SELECT * FROM a JOIN b USING (sensitive_join_col)"
+	got, _, err := RedactSQLForTrace(sql)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "sensitive_join_col") {
+		t.Fatalf("USING column leaked: %q", got)
+	}
+}
+
+func TestRedactSQLForTrace_LikeAndRegexpPatterns(t *testing.T) {
+	cases := []string{
+		"SELECT * FROM t WHERE name LIKE '%alice@example.com%'",
+		"SELECT * FROM t WHERE name REGEXP '^alice@.*'",
+	}
+	for _, sql := range cases {
+		got, _, err := RedactSQLForTrace(sql)
+		if err != nil {
+			t.Fatalf("unexpected error for %q: %v", sql, err)
+		}
+		if strings.Contains(got, "alice") {
+			t.Fatalf("pattern literal leaked for %q: %q", sql, got)
+		}
+	}
+}
+
+func TestRedactSQLForTrace_SubqueryRedacts(t *testing.T) {
+	sql := "SELECT * FROM t WHERE id IN (SELECT id FROM secret_table)"
+	got, _, err := RedactSQLForTrace(sql)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "secret_table") {
+		t.Fatalf("subquery table name leaked: %q", got)
+	}
+}
+
+func TestRedactSQLForTrace_UpdateSetClause(t *testing.T) {
+	sql := "UPDATE t SET secret_col = 'leaky_value' WHERE c = 1"
+	got, _, err := RedactSQLForTrace(sql)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "secret_col") {
+		t.Fatalf("UPDATE column name leaked: %q", got)
+	}
+	if strings.Contains(got, "leaky_value") {
+		t.Fatalf("UPDATE value leaked: %q", got)
+	}
+}
+
 func TestMapping_TokensRepeat(t *testing.T) {
 	m := NewMapping()
 	if got := m.RedactTable("foo"); got != "t1" {

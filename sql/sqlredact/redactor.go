@@ -60,8 +60,17 @@ func redactStmt(stmt sqlparser.Statement, m *Mapping) error {
 		case *sqlparser.ColName:
 			redactColName(n, m)
 			return false, nil
+		case *sqlparser.AliasedExpr:
+			redactAliasedExpr(n, m)
+			return true, nil
 		case *sqlparser.AliasedTableExpr:
 			redactAliasedTableExpr(n, m)
+			return true, nil
+		case *sqlparser.CommonTableExpr:
+			redactCommonTableExpr(n, m)
+			return true, nil
+		case *sqlparser.JoinTableExpr:
+			redactJoinTableExpr(n, m)
 			return true, nil
 		case sqlparser.TableName:
 			// Visited by-value: any mutation here is on a copy and
@@ -101,6 +110,51 @@ func redactColName(n *sqlparser.ColName, m *Mapping) {
 	}
 	if !n.Qualifier.IsEmpty() {
 		n.Qualifier = redactTableName(n.Qualifier, m)
+	}
+}
+
+// redactAliasedExpr rewrites the AS alias on a SELECT-list expression.
+// `SELECT email AS user_email_addr` produces a *AliasedExpr whose As
+// field is a ColIdent — without this case the alias text would land
+// in the rendered output unchanged.
+func redactAliasedExpr(n *sqlparser.AliasedExpr, m *Mapping) {
+	if n == nil {
+		return
+	}
+	if !n.As.IsEmpty() {
+		n.As = sqlparser.NewColIdent(m.RedactColumn(n.As.String()))
+	}
+}
+
+// redactCommonTableExpr handles the CTE column-rename list:
+// `WITH x (renamed_col) AS (SELECT a FROM t) ...`. The walker
+// already visits the embedded *AliasedTableExpr (which redacts the
+// CTE alias), but the Columns slice is []ColIdent — its elements are
+// value types and can only be rewritten through the pointer parent.
+func redactCommonTableExpr(n *sqlparser.CommonTableExpr, m *Mapping) {
+	if n == nil {
+		return
+	}
+	for i := range n.Columns {
+		if !n.Columns[i].IsEmpty() {
+			n.Columns[i] = sqlparser.NewColIdent(m.RedactColumn(n.Columns[i].String()))
+		}
+	}
+}
+
+// redactJoinTableExpr handles the USING column list:
+// `JOIN b USING (sensitive_col)`. The Using slice lives on
+// JoinCondition (a value field of *JoinTableExpr) — accessible for
+// mutation through the parent pointer. The On expression is walked
+// normally and its ColNames pick up the regular *ColName case.
+func redactJoinTableExpr(n *sqlparser.JoinTableExpr, m *Mapping) {
+	if n == nil {
+		return
+	}
+	for i := range n.Condition.Using {
+		if !n.Condition.Using[i].IsEmpty() {
+			n.Condition.Using[i] = sqlparser.NewColIdent(m.RedactColumn(n.Condition.Using[i].String()))
+		}
 	}
 }
 
