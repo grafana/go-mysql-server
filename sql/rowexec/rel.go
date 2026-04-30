@@ -261,7 +261,8 @@ func (b *BaseBuilder) buildTableAlias(ctx *sql.Context, n *plan.TableAlias, row 
 		table = reflect.TypeOf(n.Child).String()
 	}
 
-	span, ctx := ctx.Span("sql.TableAlias", trace.WithAttributes(attribute.String("table", table)))
+	span, ctx := ctx.Span("sql.TableAlias",
+		trace.WithAttributes(attribute.String("table", ctx.RedactNameForTrace(table))))
 
 	iter, err := b.Build(ctx, n.Child, row)
 	if err != nil {
