@@ -5,72 +5,56 @@ import (
 	"strconv"
 )
 
-// Mapping records a per-query substitution from original identifier
-// or value text to a stable, low-entropy token. Tokens are minted on
-// first lookup in walk order; subsequent lookups for the same original
-// return the same token. Three independent namespaces are kept so a
-// table, column, and value sharing the same surface form get distinct
-// tokens.
+// Mapping records a per-query substitution from an original identifier
+// or value to a stable, low-entropy token. Tokens are minted on first
+// lookup in lexer-emit order; subsequent lookups for the same original
+// return the same token. Two independent namespaces are kept so an
+// identifier and a literal sharing the same surface form get distinct
+// tokens, but tables/columns/aliases all share the identifier
+// namespace because the lexer cannot distinguish them.
 //
-// Tokens are intentionally short and repeating (t1, c1, v1, ...) so
-// trace storage compresses well across many queries with the same
-// shape. Hashes would be anti-compression.
+// Tokens are intentionally short and repeating (n1, n2, ..., v1, v2,
+// ...) so trace storage compresses well across many queries with the
+// same shape. Hashes would be anti-compression.
 //
 // A Mapping is safe to use from a single goroutine. The intended
 // usage is: build during parse, read during execute. No locking.
 type Mapping struct {
-	tables  map[string]string
-	columns map[string]string
-	values  map[string]string
+	idents map[string]string
+	values map[string]string
 
-	tCount int
-	cCount int
+	nCount int
 	vCount int
 }
 
-// NewMapping returns an empty mapping with the three namespaces
+// NewMapping returns an empty mapping with the two namespaces
 // initialized.
 func NewMapping() *Mapping {
 	return &Mapping{
-		tables:  map[string]string{},
-		columns: map[string]string{},
-		values:  map[string]string{},
+		idents: map[string]string{},
+		values: map[string]string{},
 	}
 }
 
-// RedactTable returns a stable token for orig in the table namespace.
-// The empty string is returned unchanged so the caller can preserve
-// "no qualifier" cases without a special branch.
-func (m *Mapping) RedactTable(orig string) string {
+// RedactIdent returns a stable token for orig in the identifier
+// namespace (table, column, alias, schema — the lexer does not
+// distinguish). The empty string passes through.
+func (m *Mapping) RedactIdent(orig string) string {
 	if m == nil || orig == "" {
 		return orig
 	}
-	if t, ok := m.tables[orig]; ok {
+	if t, ok := m.idents[orig]; ok {
 		return t
 	}
-	m.tCount++
-	t := "t" + strconv.Itoa(m.tCount)
-	m.tables[orig] = t
+	m.nCount++
+	t := "n" + strconv.Itoa(m.nCount)
+	m.idents[orig] = t
 	return t
 }
 
-// RedactColumn returns a stable token for orig in the column namespace.
-func (m *Mapping) RedactColumn(orig string) string {
-	if m == nil || orig == "" {
-		return orig
-	}
-	if t, ok := m.columns[orig]; ok {
-		return t
-	}
-	m.cCount++
-	t := "c" + strconv.Itoa(m.cCount)
-	m.columns[orig] = t
-	return t
-}
-
-// RedactValue returns a stable token for orig in the value namespace.
-// The token is a bare name (no leading colon); callers that want bind
-// var syntax should prefix.
+// RedactValue returns a stable token for orig in the literal-value
+// namespace (string, integer, float, hex, bit literal). The token is
+// a bare name; callers that want bind-arg syntax should prefix.
 func (m *Mapping) RedactValue(orig string) string {
 	if m == nil {
 		return orig
@@ -84,13 +68,10 @@ func (m *Mapping) RedactValue(orig string) string {
 	return t
 }
 
-// Tables returns a copy of the original→token map for tables.
-func (m *Mapping) Tables() map[string]string { return copyMap(m.tables) }
+// Idents returns a copy of the original→token map for identifiers.
+func (m *Mapping) Idents() map[string]string { return copyMap(m.idents) }
 
-// Columns returns a copy of the original→token map for columns.
-func (m *Mapping) Columns() map[string]string { return copyMap(m.columns) }
-
-// Values returns a copy of the original→token map for values.
+// Values returns a copy of the original→token map for literal values.
 func (m *Mapping) Values() map[string]string { return copyMap(m.values) }
 
 func copyMap(in map[string]string) map[string]string {
@@ -102,11 +83,11 @@ func copyMap(in map[string]string) map[string]string {
 }
 
 // String returns a debug-friendly summary, used in trace error events
-// when redaction is partial. Stable ordering by token name.
+// when redaction is partial.
 func (m *Mapping) String() string {
 	if m == nil {
 		return "<nil mapping>"
 	}
-	return fmt.Sprintf("sqlredact.Mapping{tables:%d cols:%d vals:%d}",
-		m.tCount, m.cCount, m.vCount)
+	return fmt.Sprintf("sqlredact.Mapping{idents:%d values:%d}",
+		m.nCount, m.vCount)
 }

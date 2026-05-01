@@ -427,10 +427,10 @@ func (c *Context) RedactQueryForTrace(query string) string {
 }
 
 // RedactNameForTrace returns name in its trace-safe form using this
-// context's table-namespace mapping. Tokens are minted on first use,
-// so a name appearing only in a rowexec span (never in the parsed
-// SQL) still gets a stable token. When redaction is disabled, returns
-// the input unchanged.
+// context's identifier-namespace mapping. Tokens are minted on first
+// use, so a name appearing only in a rowexec span (never in the
+// parsed SQL) still gets a stable token. When redaction is disabled,
+// returns the input unchanged.
 func (c *Context) RedactNameForTrace(name string) string {
 	if c == nil || c.traceRedactionDisabled {
 		return name
@@ -438,7 +438,7 @@ func (c *Context) RedactNameForTrace(name string) string {
 	if c.redactionMapping == nil {
 		c.redactionMapping = sqlredact.NewMapping()
 	}
-	return c.redactionMapping.RedactTable(name)
+	return c.redactionMapping.RedactIdent(name)
 }
 
 var ctxNowFunc = time.Now

@@ -1,285 +1,227 @@
 // Package sqlredact rewrites SQL queries into a form safe to attach to
-// trace span attributes. Identifiers (table, column, schema names) and
-// literal values are replaced with stable, low-entropy tokens (t1, c1,
-// v1, ...) that repeat across queries of the same shape so storage
-// compresses well.
+// trace span attributes. Identifiers (table, column, schema, alias
+// names) and literal values are replaced with stable, low-entropy
+// tokens (n1, n2, ..., v1, v2, ...) that repeat across queries of the
+// same shape so storage compresses well.
 //
-// This is distinct from sqlparser.Normalize / RedactSQLQuery, which is
-// a query-plan-cache primitive that parameterizes literals only. The
-// redactor here treats the trace surface as a privacy boundary: it
-// covers identifiers, drops margin comments, and falls back to a fixed
-// "<unparseable>" string when parsing fails.
+// The implementation combines two passes over the same SQL:
 //
-// The companion *Mapping return value lets callers redact downstream
-// trace attributes (e.g. resolved table names emitted from rowexec
-// spans) using the same tokens that appeared in the parsed query.
+//  1. Parse to AST, then walk the AST to collect every TableIdent
+//     and ColIdent string. The grammar is the authority on which
+//     lexemes are identifiers — this is necessary because vitess
+//     treats hundreds of words (e.g. NAME, USER, DATA, STATUS) as
+//     "non-reserved keywords" that the lexer emits with a keyword
+//     token type, even though they may appear in identifier
+//     positions in real queries.
+//
+//  2. Lex the SQL and emit each token. ID tokens redact as
+//     identifiers; literal tokens (STRING/INTEGRAL/FLOAT/HEX/HEXNUM/
+//     BIT_LITERAL) redact as values; COMMENT tokens drop;
+//     placeholder tokens (VALUE_ARG/LIST_ARG) pass through; any
+//     other token (keyword, punctuation, multi-character operator)
+//     emits structurally — UNLESS its val is in the identifier set
+//     from step (1), in which case it redacts as an identifier
+//     (catches the "non-reserved keyword used as a column name"
+//     case).
+//
+// Coverage is bounded by the grammar's notion of identifier rather
+// than by an evolving list of AST node fields: any future AST shape
+// that holds a TableIdent or ColIdent gets covered automatically as
+// long as it participates in Walk. Combined with the closed set of
+// lexer literal-token types, the redactor cannot silently leak
+// customer data through new grammar additions.
+//
+// On parse failure the redacted string is UnparseableMarker. We
+// could fall back to lex-only redaction in that case but it would
+// leak non-reserved keyword identifiers, so we prefer to publish
+// nothing rather than leak partial data.
+//
+// This is distinct from sqlparser.Normalize / RedactSQLQuery, which
+// is a query-plan-cache primitive that parameterizes literals only,
+// dedupes only inside SELECT, and skips long values for CPU. The
+// redactor here treats the trace surface as a privacy boundary:
+// every high-cardinality token is rewritten, always dedupes, drops
+// comments, and falls back to UnparseableMarker on parse errors.
 package sqlredact
 
 import (
+	"errors"
+	"strings"
+
 	"github.com/dolthub/vitess/go/vt/sqlparser"
 )
 
 // UnparseableMarker is the value substituted when the input cannot be
-// parsed. Callers should treat any returned redacted string as opaque
-// — never re-parse it or display it as a "fixed" version of the user's
-// SQL.
+// parsed (or lexed). Callers should treat any returned redacted
+// string as opaque — never re-parse it or display it as a "fixed"
+// version of the user's SQL.
 const UnparseableMarker = "<unparseable>"
 
-// RedactSQLForTrace parses sql and returns a copy with identifiers and
-// literal values replaced by stable tokens. The returned Mapping
-// records the substitutions so callers can redact related downstream
-// attributes (resolved table names, etc.) consistently.
+// ErrLexFailed is returned when the lexer hits an irrecoverable error
+// before reaching EOF.
+var ErrLexFailed = errors.New("sqlredact: lex failed")
+
+// RedactSQLForTrace tokenizes sql and returns a copy in which every
+// high-cardinality token (identifiers and literals) has been replaced
+// by a stable token in the returned Mapping. Comments are dropped.
+// Keywords, punctuation, and multi-character operators pass through.
 //
-// On parse failure the redacted string is UnparseableMarker, the
-// Mapping is empty, and the parse error is returned. Callers should
-// always use the returned redacted string (never the input) when
-// publishing to traces, regardless of error.
+// The Mapping records the substitutions so callers can redact
+// related downstream attributes (resolved table names emitted from
+// rowexec spans, etc.) consistently.
+//
+// On parse or lex failure the redacted string is UnparseableMarker,
+// the Mapping is empty, and a non-nil error is returned. Callers
+// should always use the returned redacted string (never the input)
+// when publishing to traces, regardless of error.
 func RedactSQLForTrace(sql string) (string, *Mapping, error) {
+	stmt, parseErr := sqlparser.Parse(sql)
+	if parseErr != nil {
+		return UnparseableMarker, NewMapping(), parseErr
+	}
+	identSet := collectIdents(stmt)
+
 	m := NewMapping()
-	stmt, err := sqlparser.Parse(sql)
-	if err != nil {
-		return UnparseableMarker, m, err
-	}
-	if err := redactStmt(stmt, m); err != nil {
-		return UnparseableMarker, m, err
-	}
-	return sqlparser.String(stmt), m, nil
-}
+	var out strings.Builder
+	out.Grow(len(sql))
 
-// redactStmt mutates stmt in place using the provided Mapping. The
-// walker visits the pointer-parent nodes that own value-typed
-// identifiers (TableIdent, ColIdent embedded in TableName, ColName,
-// AliasedTableExpr, etc.) and rewrites them via reassignment.
-//
-// Nodes that the visitor handles fully (identifiers and literals) are
-// returned with kontinue=false to prevent the walker from descending
-// into already-rewritten subtrees and double-counting tokens.
-func redactStmt(stmt sqlparser.Statement, m *Mapping) error {
-	visit := func(node sqlparser.SQLNode) (bool, error) {
-		switch n := node.(type) {
-		case *sqlparser.ColName:
-			redactColName(n, m)
-			return false, nil
-		case *sqlparser.AliasedExpr:
-			redactAliasedExpr(n, m)
-			return true, nil
-		case *sqlparser.AliasedTableExpr:
-			redactAliasedTableExpr(n, m)
-			return true, nil
-		case *sqlparser.CommonTableExpr:
-			redactCommonTableExpr(n, m)
-			return true, nil
-		case *sqlparser.JoinTableExpr:
-			redactJoinTableExpr(n, m)
-			return true, nil
-		case sqlparser.TableName:
-			// Visited by-value: any mutation here is on a copy and
-			// won't propagate. Pointer parents that own a TableName
-			// (AliasedTableExpr.Expr, ColName.Qualifier, *Insert.Table,
-			// etc.) handle rewriting at their own visit step.
-			return false, nil
-		case *sqlparser.Insert:
-			redactInsert(n, m)
-			return true, nil
-		case *sqlparser.Update:
-			redactUpdate(n, m)
-			return true, nil
-		case *sqlparser.Delete:
-			redactDelete(n, m)
-			return true, nil
-		case *sqlparser.SQLVal:
-			redactSQLVal(n, m)
-			return false, nil
-		case *sqlparser.ComparisonExpr:
-			redactComparison(n, m)
-			return true, nil
+	tk := sqlparser.NewStringTokenizer(sql)
+	first := true
+	for {
+		typ, val := tk.Scan()
+		if typ == 0 {
+			break
 		}
-		return true, nil
-	}
-	return sqlparser.Walk(visit, stmt)
-}
-
-// redactColName rewrites the column name and any embedded table
-// qualifier on a *ColName.
-func redactColName(n *sqlparser.ColName, m *Mapping) {
-	if n == nil {
-		return
-	}
-	if !n.Name.IsEmpty() {
-		n.Name = sqlparser.NewColIdent(m.RedactColumn(n.Name.String()))
-	}
-	if !n.Qualifier.IsEmpty() {
-		n.Qualifier = redactTableName(n.Qualifier, m)
-	}
-}
-
-// redactAliasedExpr rewrites the AS alias on a SELECT-list expression.
-// `SELECT email AS user_email_addr` produces a *AliasedExpr whose As
-// field is a ColIdent — without this case the alias text would land
-// in the rendered output unchanged.
-func redactAliasedExpr(n *sqlparser.AliasedExpr, m *Mapping) {
-	if n == nil {
-		return
-	}
-	if !n.As.IsEmpty() {
-		n.As = sqlparser.NewColIdent(m.RedactColumn(n.As.String()))
-	}
-}
-
-// redactCommonTableExpr handles the CTE column-rename list:
-// `WITH x (renamed_col) AS (SELECT a FROM t) ...`. The walker
-// already visits the embedded *AliasedTableExpr (which redacts the
-// CTE alias), but the Columns slice is []ColIdent — its elements are
-// value types and can only be rewritten through the pointer parent.
-func redactCommonTableExpr(n *sqlparser.CommonTableExpr, m *Mapping) {
-	if n == nil {
-		return
-	}
-	for i := range n.Columns {
-		if !n.Columns[i].IsEmpty() {
-			n.Columns[i] = sqlparser.NewColIdent(m.RedactColumn(n.Columns[i].String()))
+		if typ == sqlparser.LEX_ERROR {
+			return UnparseableMarker, NewMapping(), ErrLexFailed
 		}
-	}
-}
-
-// redactJoinTableExpr handles the USING column list:
-// `JOIN b USING (sensitive_col)`. The Using slice lives on
-// JoinCondition (a value field of *JoinTableExpr) — accessible for
-// mutation through the parent pointer. The On expression is walked
-// normally and its ColNames pick up the regular *ColName case.
-func redactJoinTableExpr(n *sqlparser.JoinTableExpr, m *Mapping) {
-	if n == nil {
-		return
-	}
-	for i := range n.Condition.Using {
-		if !n.Condition.Using[i].IsEmpty() {
-			n.Condition.Using[i] = sqlparser.NewColIdent(m.RedactColumn(n.Condition.Using[i].String()))
+		if typ == sqlparser.COMMENT {
+			continue
 		}
+		if !first {
+			out.WriteByte(' ')
+		}
+		first = false
+		emitToken(&out, typ, val, m, identSet)
 	}
+	return out.String(), m, nil
 }
 
-// redactAliasedTableExpr rewrites the alias and (when the table
-// expression is a TableName) the table identifier itself. Subqueries
-// and VALUES expressions are left to the walker to descend into.
-//
-// TableHints carry user-provided values in TableHint.Value (e.g.
-// rate('5m')); each is treated as a value-namespace token.
-func redactAliasedTableExpr(n *sqlparser.AliasedTableExpr, m *Mapping) {
-	if n == nil {
-		return
-	}
-	if !n.As.IsEmpty() {
-		n.As = sqlparser.NewTableIdent(m.RedactTable(n.As.String()))
-	}
-	if tn, ok := n.Expr.(sqlparser.TableName); ok {
-		n.Expr = redactTableName(tn, m)
-	}
-	if n.TableHints != nil {
-		for i := range n.TableHints.Hints {
-			if n.TableHints.Hints[i].Value != "" {
-				n.TableHints.Hints[i].Value = m.RedactValue(n.TableHints.Hints[i].Value)
+// collectIdents walks the AST and collects every TableIdent and
+// ColIdent value. These are the only identifier types in the vitess
+// AST — every place the grammar accepts a user-supplied name (table,
+// column, alias, schema, CTE column rename, USING list, etc.) ends
+// up with one of these two types in the resulting AST.
+func collectIdents(stmt sqlparser.Statement) map[string]struct{} {
+	idents := map[string]struct{}{}
+	_ = sqlparser.Walk(func(n sqlparser.SQLNode) (bool, error) {
+		switch v := n.(type) {
+		case sqlparser.TableIdent:
+			if !v.IsEmpty() {
+				idents[v.String()] = struct{}{}
+			}
+		case sqlparser.ColIdent:
+			if !v.IsEmpty() {
+				idents[v.String()] = struct{}{}
 			}
 		}
-	}
+		return true, nil
+	}, stmt)
+	return idents
 }
 
-// redactTableName returns a copy of tn with each non-empty identifier
-// segment replaced by a table-namespace token. Segments are mapped in
-// left-to-right (db, schema, name) order so the rendered token order
-// reads naturally — `s1.t1` rather than `t2.t1` for a qualified name.
-// All three segments share the table namespace so a name appearing
-// once as a qualifier and once as a leaf gets the same token.
-func redactTableName(tn sqlparser.TableName, m *Mapping) sqlparser.TableName {
-	if !tn.DbQualifier.IsEmpty() {
-		tn.DbQualifier = sqlparser.NewTableIdent(m.RedactTable(tn.DbQualifier.String()))
-	}
-	if !tn.SchemaQualifier.IsEmpty() {
-		tn.SchemaQualifier = sqlparser.NewTableIdent(m.RedactTable(tn.SchemaQualifier.String()))
-	}
-	if !tn.Name.IsEmpty() {
-		tn.Name = sqlparser.NewTableIdent(m.RedactTable(tn.Name.String()))
-	}
-	return tn
-}
-
-// redactInsert handles INSERT-statement-specific identifiers that
-// the generic walker would otherwise miss because Insert holds its
-// target Table as a TableName by value.
-func redactInsert(n *sqlparser.Insert, m *Mapping) {
-	if n == nil {
-		return
-	}
-	n.Table = redactTableName(n.Table, m)
-	for i := range n.Columns {
-		if !n.Columns[i].IsEmpty() {
-			n.Columns[i] = sqlparser.NewColIdent(m.RedactColumn(n.Columns[i].String()))
+// emitToken writes a single redacted token to out. The branching
+// matches the categorization of token types into:
+//   - identifier (ID)
+//   - literal value (STRING, INTEGRAL, FLOAT, HEX, HEXNUM, BIT_LITERAL)
+//   - already-bound placeholder (VALUE_ARG, LIST_ARG)
+//   - structural (everything else: keyword, punctuation, multi-char op)
+//
+// Keywords whose val matches a name in identSet are treated as
+// identifiers — that's how non-reserved-keyword column names get
+// covered.
+func emitToken(out *strings.Builder, typ int, val []byte, m *Mapping, identSet map[string]struct{}) {
+	switch typ {
+	case sqlparser.ID:
+		emitIdent(out, val, m)
+	case sqlparser.STRING:
+		out.WriteByte('\'')
+		out.WriteString(m.RedactValue(string(val)))
+		out.WriteByte('\'')
+	case sqlparser.INTEGRAL, sqlparser.FLOAT, sqlparser.HEXNUM:
+		out.WriteByte(':')
+		out.WriteString(m.RedactValue(string(val)))
+	case sqlparser.HEX:
+		out.WriteString("X'")
+		out.WriteString(m.RedactValue(string(val)))
+		out.WriteByte('\'')
+	case sqlparser.BIT_LITERAL:
+		out.WriteString("B'")
+		out.WriteString(m.RedactValue(string(val)))
+		out.WriteByte('\'')
+	case sqlparser.VALUE_ARG, sqlparser.LIST_ARG:
+		out.Write(val)
+	default:
+		if len(val) > 0 {
+			if _, ok := identSet[string(val)]; ok {
+				// Non-reserved keyword used as an identifier.
+				emitIdent(out, val, m)
+				return
+			}
 		}
+		emitStructural(out, typ, val)
 	}
 }
 
-// redactUpdate is currently a no-op — Update's TableExprs are visited
-// via the walker (each is a *AliasedTableExpr) and SET expressions are
-// covered by *ColName / *SQLVal handlers. Kept as a hook for future
-// fields (e.g. ON DUPLICATE clauses) that may carry data.
-func redactUpdate(n *sqlparser.Update, m *Mapping) {
-	_ = n
-	_ = m
+// emitIdent writes a backtick-quoted redacted identifier.
+func emitIdent(out *strings.Builder, val []byte, m *Mapping) {
+	out.WriteByte('`')
+	out.WriteString(m.RedactIdent(string(val)))
+	out.WriteByte('`')
 }
 
-// redactDelete handles Delete-specific Targets if present. The
-// FROM-side TableExprs are reached via the regular walker.
-func redactDelete(n *sqlparser.Delete, m *Mapping) {
-	if n == nil {
+// emitStructural writes a non-redacted token (keyword, punctuation,
+// or multi-character operator). These are bounded by the SQL grammar
+// and contain no customer data.
+func emitStructural(out *strings.Builder, typ int, val []byte) {
+	if len(val) > 0 {
+		// Keyword text from the lexer (e.g. "SELECT", "AND", "true").
+		out.Write(val)
 		return
 	}
-	for i := range n.Targets {
-		n.Targets[i] = redactTableName(n.Targets[i], m)
+	if typ < 256 {
+		// Single-character operator (e.g. '=', '(', ',').
+		out.WriteByte(byte(typ))
+		return
 	}
+	// Multi-character symbol operator emitted with empty val.
+	if s, ok := symbolOps[typ]; ok {
+		out.WriteString(s)
+		return
+	}
+	// Unknown structural token — fall back to a separator. This
+	// branch is only reachable for typ ≥ 256 with empty val that we
+	// don't recognize; a leak is impossible because val is empty.
+	out.WriteByte(' ')
 }
 
-// redactSQLVal converts a literal into a bind-arg-shaped token so the
-// rendered SQL stays a syntactically valid prepared statement (":v1"
-// rather than a bare "v1"). ValArg-typed nodes are already bind args
-// and are left alone.
-func redactSQLVal(n *sqlparser.SQLVal, m *Mapping) {
-	if n == nil || n.Type == sqlparser.ValArg {
-		return
-	}
-	tok := m.RedactValue(string(n.Val))
-	n.Type = sqlparser.ValArg
-	n.Val = []byte(":" + tok)
-}
-
-// redactComparison preserves the existing IN/NOT IN list-bind-arg
-// shape: an entire tuple collapses to one ListArg token whose name is
-// allocated from the value namespace.
-func redactComparison(n *sqlparser.ComparisonExpr, m *Mapping) {
-	if n == nil {
-		return
-	}
-	if n.Operator != sqlparser.InStr && n.Operator != sqlparser.NotInStr {
-		return
-	}
-	tuple, ok := n.Right.(sqlparser.ValTuple)
-	if !ok {
-		return
-	}
-	// Build a single representative key from the tuple values so two
-	// IN clauses with the same shape map to the same token.
-	key := "("
-	for i, v := range tuple {
-		if i > 0 {
-			key += ","
-		}
-		if sv, ok := v.(*sqlparser.SQLVal); ok {
-			key += string(sv.Val)
-		} else {
-			// Mixed/expression tuples skip the collapse path; the walker
-			// will recurse into individual SQLVals normally.
-			return
-		}
-	}
-	key += ")"
-	tok := m.RedactValue(key)
-	n.Right = sqlparser.ListArg(append([]byte("::"), tok...))
+// symbolOps maps the multi-character symbol-operator token types
+// emitted by the vitess lexer with empty val back to their textual
+// representation. Sourced from token.go's Scan implementation.
+var symbolOps = map[int]string{
+	sqlparser.LE:                      "<=",
+	sqlparser.GE:                      ">=",
+	sqlparser.NE:                      "!=",
+	sqlparser.SHIFT_LEFT:              "<<",
+	sqlparser.SHIFT_RIGHT:             ">>",
+	sqlparser.NULL_SAFE_EQUAL:         "<=>",
+	sqlparser.JSON_EXTRACT_OP:         "->",
+	sqlparser.JSON_UNQUOTE_EXTRACT_OP: "->>",
+	// AND/OR also reach this branch when the input used the symbolic
+	// `&&` / `||` forms; when the input used the keyword spellings,
+	// val carries the keyword text and the symbolOps lookup is
+	// bypassed by emitStructural's len(val)>0 guard.
+	sqlparser.AND:    "&&",
+	sqlparser.OR:     "||",
+	sqlparser.CONCAT: "||",
 }
