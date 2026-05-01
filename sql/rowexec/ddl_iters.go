@@ -837,7 +837,7 @@ func createIndex(
 ) {
 	span, ctx := ctx.Span("plan.createIndex",
 		trace.WithAttributes(
-			attribute.String("index", index.ID()),
+			attribute.String("index", ctx.RedactNameForTrace(index.ID())),
 			attribute.String("table", ctx.RedactNameForTrace(index.Table())),
 			attribute.String("driver", index.Driver()),
 		),

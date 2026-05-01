@@ -441,6 +441,29 @@ func (c *Context) RedactNameForTrace(name string) string {
 	return c.redactionMapping.RedactIdent(name)
 }
 
+// redactedFragmentMarker is what RedactStringerForTrace returns for a
+// SQL fragment when redaction is enabled. We can't safely re-tokenize
+// arbitrary expression text against the per-query mapping (the
+// expression may reference identifiers that were never in the parsed
+// SQL — e.g. internal pushdown rewrites), so we drop the value
+// entirely. The plan-level span itself still fires and preserves
+// timing — only the textual attribute disappears.
+const redactedFragmentMarker = "<redacted>"
+
+// RedactStringerForTrace renders v.String() into a span-attribute-
+// safe form. Used at sites that previously emitted attribute.Stringer
+// for SQL fragments (e.g. LIMIT/OFFSET expressions) — calling
+// .String() on a sql.Expression can return arbitrary user-supplied
+// SQL text, so under redaction we substitute a fixed marker.
+//
+// Returns the original .String() output when redaction is disabled.
+func (c *Context) RedactStringerForTrace(v interface{ String() string }) string {
+	if c == nil || c.traceRedactionDisabled {
+		return v.String()
+	}
+	return redactedFragmentMarker
+}
+
 var ctxNowFunc = time.Now
 var ctxNowFuncMutex = &sync.Mutex{}
 

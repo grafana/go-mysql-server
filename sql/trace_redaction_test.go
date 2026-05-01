@@ -107,6 +107,28 @@ func TestTraceRedaction_DisabledPassesThrough(t *testing.T) {
 	}
 }
 
+type stubStringer string
+
+func (s stubStringer) String() string { return string(s) }
+
+func TestTraceRedaction_RedactStringerForTrace(t *testing.T) {
+	enabled := NewContext(context.Background())
+	if got := enabled.RedactStringerForTrace(stubStringer("user_col + 5")); !strings.Contains(got, "redacted") {
+		t.Fatalf("enabled context should mask SQL fragment, got %q", got)
+	}
+
+	disabled := NewContext(context.Background(), WithTraceRedaction(false))
+	const original = "user_col + 5"
+	if got := disabled.RedactStringerForTrace(stubStringer(original)); got != original {
+		t.Fatalf("disabled context should return original Stringer text, got %q", got)
+	}
+
+	var nilCtx *Context
+	if got := nilCtx.RedactStringerForTrace(stubStringer(original)); got != original {
+		t.Fatalf("nil context should return original Stringer text, got %q", got)
+	}
+}
+
 func TestTraceRedaction_UnparseableQuery(t *testing.T) {
 	ctx := NewContext(context.Background())
 	got := ctx.RedactQueryForTrace("not even close to sql ;;")
