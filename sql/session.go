@@ -392,37 +392,36 @@ func (c *Context) TraceRedactionEnabled() bool {
 	return !c.traceRedactionDisabled
 }
 
-// RedactionMapping returns the per-query redaction mapping, lazily
-// allocating it on first call when redaction is enabled. Returns nil
-// when redaction is disabled — callers should treat that as "use the
-// original strings".
+// RedactionMapping returns the per-query redaction mapping. It is
+// eagerly allocated by NewContext when redaction is enabled, so
+// concurrent rowexec spans never race on lazy initialization.
+// Returns nil when redaction is disabled or the context is nil.
 func (c *Context) RedactionMapping() *sqlredact.Mapping {
 	if c == nil || c.traceRedactionDisabled {
 		return nil
-	}
-	if c.redactionMapping == nil {
-		c.redactionMapping = sqlredact.NewMapping()
 	}
 	return c.redactionMapping
 }
 
 // RedactQueryForTrace returns query in its trace-safe form. When
-// redaction is enabled, it parses the query, populates this context's
-// mapping with the substitutions, and returns the redacted text. On
-// parse failure it returns sqlredact.UnparseableMarker; the parse
-// error itself is intentionally swallowed so trace-attribute callers
-// don't need an error path.
+// redaction is enabled, it parses the query and populates this
+// context's mapping (in place — the pointer is never replaced after
+// NewContext) with the substitutions, then returns the redacted
+// text. On parse failure it returns sqlredact.UnparseableMarker;
+// the parse error itself is intentionally swallowed so
+// trace-attribute callers don't need an error path.
 //
 // When redaction is disabled, the input is returned unchanged.
 func (c *Context) RedactQueryForTrace(query string) string {
 	if c == nil || c.traceRedactionDisabled {
 		return query
 	}
-	redacted, m, _ := sqlredact.RedactSQLForTrace(query)
-	// Replace any prior mapping — a single Context is per-query and
-	// the parse-time mapping is the source of truth for downstream
-	// span attributes.
-	c.redactionMapping = m
+	// Populate THE EXISTING mapping (allocated eagerly in
+	// NewContext) rather than replacing it. The mapping pointer is
+	// already shared with in-flight rowexec spans; replacing it
+	// would race those reads. The Mapping's internal mutex covers
+	// the writes done here.
+	redacted, _ := sqlredact.RedactSQLForTraceInto(query, c.redactionMapping)
 	return redacted
 }
 
@@ -434,9 +433,6 @@ func (c *Context) RedactQueryForTrace(query string) string {
 func (c *Context) RedactNameForTrace(name string) string {
 	if c == nil || c.traceRedactionDisabled {
 		return name
-	}
-	if c.redactionMapping == nil {
-		c.redactionMapping = sqlredact.NewMapping()
 	}
 	return c.redactionMapping.RedactIdent(name)
 }
@@ -532,6 +528,14 @@ func NewContext(
 	}
 	if c.Session == nil {
 		c.Session = NewBaseSession()
+	}
+	// Eager-allocate the redaction mapping so concurrent callers
+	// (parallel rowexec spans firing while RedactQueryForTrace is
+	// still running on another goroutine) never race on a nil-check
+	// followed by an allocation. The Mapping itself synchronizes
+	// concurrent mints internally.
+	if !c.traceRedactionDisabled {
+		c.redactionMapping = sqlredact.NewMapping()
 	}
 
 	return c

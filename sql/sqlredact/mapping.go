@@ -3,6 +3,7 @@ package sqlredact
 import (
 	"fmt"
 	"strconv"
+	"sync"
 )
 
 // Mapping records a per-query substitution from an original identifier
@@ -17,9 +18,15 @@ import (
 // ...) so trace storage compresses well across many queries with the
 // same shape. Hashes would be anti-compression.
 //
-// A Mapping is safe to use from a single goroutine. The intended
-// usage is: build during parse, read during execute. No locking.
+// A Mapping is safe for concurrent use. The intended pattern is:
+// populate during the initial parse pass on one goroutine, then read
+// (with occasional mint-on-miss for synthetic names that never
+// appeared in the parsed SQL) from many goroutines as parallel
+// rowexec spans fire. Writes are guarded by a sync.RWMutex so a
+// fast-path read on an existing token only takes the read lock.
 type Mapping struct {
+	mu sync.RWMutex
+
 	idents map[string]string
 	values map[string]string
 
@@ -43,6 +50,16 @@ func (m *Mapping) RedactIdent(orig string) string {
 	if m == nil || orig == "" {
 		return orig
 	}
+	m.mu.RLock()
+	if t, ok := m.idents[orig]; ok {
+		m.mu.RUnlock()
+		return t
+	}
+	m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Re-check after acquiring the write lock — another goroutine may
+	// have minted the same token between RUnlock and Lock.
 	if t, ok := m.idents[orig]; ok {
 		return t
 	}
@@ -59,6 +76,14 @@ func (m *Mapping) RedactValue(orig string) string {
 	if m == nil {
 		return orig
 	}
+	m.mu.RLock()
+	if t, ok := m.values[orig]; ok {
+		m.mu.RUnlock()
+		return t
+	}
+	m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if t, ok := m.values[orig]; ok {
 		return t
 	}
@@ -68,11 +93,27 @@ func (m *Mapping) RedactValue(orig string) string {
 	return t
 }
 
-// Idents returns a copy of the original→token map for identifiers.
-func (m *Mapping) Idents() map[string]string { return copyMap(m.idents) }
+// Idents returns a snapshot copy of the original→token map for
+// identifiers. Safe to call from any goroutine.
+func (m *Mapping) Idents() map[string]string {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return copyMap(m.idents)
+}
 
-// Values returns a copy of the original→token map for literal values.
-func (m *Mapping) Values() map[string]string { return copyMap(m.values) }
+// Values returns a snapshot copy of the original→token map for
+// literal values. Safe to call from any goroutine.
+func (m *Mapping) Values() map[string]string {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return copyMap(m.values)
+}
 
 func copyMap(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
@@ -88,6 +129,8 @@ func (m *Mapping) String() string {
 	if m == nil {
 		return "<nil mapping>"
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return fmt.Sprintf("sqlredact.Mapping{idents:%d values:%d}",
 		m.nCount, m.vCount)
 }

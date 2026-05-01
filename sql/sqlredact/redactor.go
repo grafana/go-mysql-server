@@ -75,13 +75,32 @@ var ErrLexFailed = errors.New("sqlredact: lex failed")
 // should always use the returned redacted string (never the input)
 // when publishing to traces, regardless of error.
 func RedactSQLForTrace(sql string) (string, *Mapping, error) {
+	m := NewMapping()
+	out, err := RedactSQLForTraceInto(sql, m)
+	return out, m, err
+}
+
+// RedactSQLForTraceInto is the same as RedactSQLForTrace but writes
+// substitutions into the caller-provided Mapping rather than
+// allocating a new one. Used by sql.Context's redact helpers so that
+// the same Mapping pointer is shared across all in-flight callers
+// (parent span, datasource.resolved events, GMS planbuilder spans,
+// rowexec spans) — the underlying maps' internal mutex covers the
+// concurrent reads.
+//
+// Pre-existing entries in m are preserved. Tokens already present
+// for a given original lexeme are reused; new lexemes mint fresh
+// tokens with counters continuing from m's current state.
+func RedactSQLForTraceInto(sql string, m *Mapping) (string, error) {
+	if m == nil {
+		m = NewMapping()
+	}
 	stmt, parseErr := sqlparser.Parse(sql)
 	if parseErr != nil {
-		return UnparseableMarker, NewMapping(), parseErr
+		return UnparseableMarker, parseErr
 	}
 	identSet := collectIdents(stmt)
 
-	m := NewMapping()
 	var out strings.Builder
 	out.Grow(len(sql))
 
@@ -93,7 +112,7 @@ func RedactSQLForTrace(sql string) (string, *Mapping, error) {
 			break
 		}
 		if typ == sqlparser.LEX_ERROR {
-			return UnparseableMarker, NewMapping(), ErrLexFailed
+			return UnparseableMarker, ErrLexFailed
 		}
 		if typ == sqlparser.COMMENT {
 			continue
@@ -104,7 +123,7 @@ func RedactSQLForTrace(sql string) (string, *Mapping, error) {
 		first = false
 		emitToken(&out, typ, val, m, identSet)
 	}
-	return out.String(), m, nil
+	return out.String(), nil
 }
 
 // collectIdents walks the AST and collects every TableIdent and

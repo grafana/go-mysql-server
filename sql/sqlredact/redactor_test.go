@@ -1,7 +1,10 @@
 package sqlredact
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -379,6 +382,51 @@ func TestMapping_TokensRepeat(t *testing.T) {
 	}
 	if got := m.RedactValue("foo"); got != "v1" {
 		t.Fatalf("'foo' as value should not collide with ident namespace: got %q", got)
+	}
+}
+
+func TestMapping_ConcurrentRedactIsRaceFree(t *testing.T) {
+	// Models the pattern under which Mapping is actually used in
+	// production: a parent goroutine populated the mapping during
+	// parse, then many concurrent rowexec spans read tokens for
+	// names that appeared in the SQL plus a few synthetic names that
+	// only show up at exec time. Run under `go test -race` to
+	// validate the internal mutex.
+	m := NewMapping()
+	const goroutines = 32
+	const iterations = 500
+	parsedNames := []string{"users", "orders", "items", "products", "events"}
+	for _, n := range parsedNames {
+		m.RedactIdent(n)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				// Mostly hit pre-populated names (RLock fast path).
+				_ = m.RedactIdent(parsedNames[i%len(parsedNames)])
+				// Occasionally mint a synthetic name (Lock slow path).
+				if i%50 == 0 {
+					_ = m.RedactIdent(fmt.Sprintf("synthetic_g%d_i%d", g, i))
+				}
+				// And a value lookup.
+				_ = m.RedactValue("42")
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	// Pre-populated identifiers must still map to the same tokens
+	// they were assigned at the start (no clobbering by concurrent
+	// mints).
+	for i, n := range parsedNames {
+		want := "n" + strconv.Itoa(i+1)
+		if got := m.RedactIdent(n); got != want {
+			t.Fatalf("parsed name %q: got %q, want %q", n, got, want)
+		}
 	}
 }
 
