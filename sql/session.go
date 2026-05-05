@@ -283,14 +283,18 @@ type Context struct {
 	interpreted       bool
 	Version           AnalyzerVersion
 	disableFileWrites bool
-	// traceRedactionDisabled, when true, opts the context out of SQL
+	// traceRedactionEnabled, when true, opts the context into SQL
 	// trace redaction. The zero value (false) means redaction is
-	// enabled — secure-by-default. Toggle with WithTraceRedaction.
-	traceRedactionDisabled bool
-	// redactionMapping is lazily allocated the first time a redaction
-	// helper is called on this context. It captures the original →
-	// token substitution so resolved-name attributes (rowexec spans)
-	// can be redacted with the same tokens as the parsed query.
+	// disabled — opt-in to preserve backward compatibility with
+	// trace consumers that already read the parse-span "query"
+	// attribute and rowexec table-name attrs verbatim. Toggle with
+	// WithTraceRedaction.
+	traceRedactionEnabled bool
+	// redactionMapping is allocated by NewContext when redaction is
+	// enabled (eager — never lazy after construction). It captures
+	// the original → token substitution so resolved-name attributes
+	// (rowexec spans) can be redacted with the same tokens as the
+	// parsed query.
 	redactionMapping *sqlredact.Mapping
 }
 
@@ -370,26 +374,25 @@ func (c *Context) DisableFileWrites() bool {
 }
 
 // WithTraceRedaction toggles SQL redaction for trace span attributes
-// on this context. The default (no option) is ENABLED — treat trace
-// data as a privacy boundary. Pass WithTraceRedaction(false) only as
-// an explicit opt-out (e.g. for local debugging).
-//
-// Storage is inverted internally so the zero value of the underlying
-// flag corresponds to the secure default.
+// on this context. The default (no option) is DISABLED — opt-in so
+// existing consumers of the parse-span "query" attribute and
+// rowexec table-name attrs aren't surprised by a sudden token
+// substitution on a minor-version upgrade. Pass
+// WithTraceRedaction(true) to enable redaction at deployments where
+// trace data flows to multi-tenant or long-term storage.
 func WithTraceRedaction(enabled bool) ContextOption {
 	return func(ctx *Context) {
-		ctx.traceRedactionDisabled = !enabled
+		ctx.traceRedactionEnabled = enabled
 	}
 }
 
-// TraceRedactionEnabled reports whether SQL trace redaction is active
-// for this context. Returns true for nil contexts so callers don't
-// need a separate nil check before reaching for the helper methods.
+// TraceRedactionEnabled reports whether SQL trace redaction is
+// active for this context. Returns false for nil contexts.
 func (c *Context) TraceRedactionEnabled() bool {
 	if c == nil {
-		return true
+		return false
 	}
-	return !c.traceRedactionDisabled
+	return c.traceRedactionEnabled
 }
 
 // RedactionMapping returns the per-query redaction mapping. It is
@@ -397,7 +400,7 @@ func (c *Context) TraceRedactionEnabled() bool {
 // concurrent rowexec spans never race on lazy initialization.
 // Returns nil when redaction is disabled or the context is nil.
 func (c *Context) RedactionMapping() *sqlredact.Mapping {
-	if c == nil || c.traceRedactionDisabled {
+	if c == nil || !c.traceRedactionEnabled {
 		return nil
 	}
 	return c.redactionMapping
@@ -411,9 +414,10 @@ func (c *Context) RedactionMapping() *sqlredact.Mapping {
 // the parse error itself is intentionally swallowed so
 // trace-attribute callers don't need an error path.
 //
-// When redaction is disabled, the input is returned unchanged.
+// When redaction is disabled (the default), the input is returned
+// unchanged.
 func (c *Context) RedactQueryForTrace(query string) string {
-	if c == nil || c.traceRedactionDisabled {
+	if c == nil || !c.traceRedactionEnabled {
 		return query
 	}
 	// Populate THE EXISTING mapping (allocated eagerly in
@@ -428,10 +432,10 @@ func (c *Context) RedactQueryForTrace(query string) string {
 // RedactNameForTrace returns name in its trace-safe form using this
 // context's identifier-namespace mapping. Tokens are minted on first
 // use, so a name appearing only in a rowexec span (never in the
-// parsed SQL) still gets a stable token. When redaction is disabled,
-// returns the input unchanged.
+// parsed SQL) still gets a stable token. When redaction is disabled
+// (the default), returns the input unchanged.
 func (c *Context) RedactNameForTrace(name string) string {
-	if c == nil || c.traceRedactionDisabled {
+	if c == nil || !c.traceRedactionEnabled {
 		return name
 	}
 	return c.redactionMapping.RedactIdent(name)
@@ -452,9 +456,10 @@ const redactedFragmentMarker = "<redacted>"
 // .String() on a sql.Expression can return arbitrary user-supplied
 // SQL text, so under redaction we substitute a fixed marker.
 //
-// Returns the original .String() output when redaction is disabled.
+// Returns the original .String() output when redaction is disabled
+// (the default).
 func (c *Context) RedactStringerForTrace(v interface{ String() string }) string {
-	if c == nil || c.traceRedactionDisabled {
+	if c == nil || !c.traceRedactionEnabled {
 		return v.String()
 	}
 	return redactedFragmentMarker
@@ -534,7 +539,7 @@ func NewContext(
 	// still running on another goroutine) never race on a nil-check
 	// followed by an allocation. The Mapping itself synchronizes
 	// concurrent mints internally.
-	if !c.traceRedactionDisabled {
+	if c.traceRedactionEnabled {
 		c.redactionMapping = sqlredact.NewMapping()
 	}
 
