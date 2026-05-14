@@ -784,8 +784,8 @@ var (
 	// ErrFileWritesDisabled is returned when INTO OUTFILE/DUMPFILE is used but file writes are disabled
 	ErrFileWritesDisabled = errors.NewKind("file write operations (INTO OUTFILE/DUMPFILE) are disabled")
 
-	// ErrFileReadsDisabled is returned when LOAD_FILE is used but file reads are disabled
-	ErrFileReadsDisabled = errors.NewKind("file read operations (LOAD_FILE) are disabled")
+	// ErrFileReadsDisabled is returned when LOAD_FILE or LOAD DATA INFILE is used but file reads are disabled
+	ErrFileReadsDisabled = errors.NewKind("file read operations (LOAD_FILE/LOAD DATA INFILE) are disabled")
 
 	// ErrFileExists is returned when a file already exists
 	ErrFileExists = errors.NewKind("File '%s' already exists")

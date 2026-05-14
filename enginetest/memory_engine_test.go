@@ -546,6 +546,25 @@ func TestLoadData(t *testing.T) {
 	enginetest.TestLoadData(t, enginetest.NewDefaultMemoryHarness())
 }
 
+func TestLoadDataDisableFileReads(t *testing.T) {
+	harness := enginetest.NewDefaultMemoryHarness()
+	harness.Setup(setup.MydbData)
+	engine, err := harness.NewEngine(t)
+	require.NoError(t, err)
+	defer engine.Close()
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, sql.SystemVariables.AssignValues(map[string]interface{}{
+		"secure_file_priv": wd,
+	}))
+
+	ctx := enginetest.NewContext(harness)
+	ctx.ApplyOpts(sql.WithDisableFileReads(true))
+	enginetest.RunQueryWithContext(t, engine, harness, ctx, "create table loadtable(pk int primary key)")
+	enginetest.AssertErrWithCtx(t, engine, harness, ctx, "LOAD DATA INFILE './testdata/test1.txt' INTO TABLE loadtable FIELDS ENCLOSED BY '\"'", nil, sql.ErrFileReadsDisabled)
+}
+
 func TestLoadDataErrors(t *testing.T) {
 	enginetest.TestLoadDataErrors(t, enginetest.NewDefaultMemoryHarness())
 }
