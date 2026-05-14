@@ -60,6 +60,10 @@ func (b *BaseBuilder) buildDropTrigger(ctx *sql.Context, n *plan.DropTrigger, ro
 }
 
 func (b *BaseBuilder) buildLoadData(ctx *sql.Context, n *plan.LoadData, row sql.Row) (sql.RowIter, error) {
+	if ctx.DisableFileReads() {
+		return nil, sql.ErrFileReadsDisabled.New()
+	}
+
 	var reader io.ReadCloser
 	var err error
 	if n.Local {

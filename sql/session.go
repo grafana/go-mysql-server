@@ -281,6 +281,7 @@ type Context struct {
 	interpreted       bool
 	Version           AnalyzerVersion
 	disableFileWrites bool
+	disableFileReads  bool
 }
 
 // ContextOption is a function to configure the context.
@@ -356,6 +357,23 @@ func (c *Context) DisableFileWrites() bool {
 		return false
 	}
 	return c.disableFileWrites
+}
+
+// WithDisableFileReads disables LOAD_FILE() and LOAD DATA INFILE for this context.
+// When true, any attempt to read a file will return ErrFileReadsDisabled.
+// Intended for embedded or sandboxed use (e.g. SQL expressions) where file reads are a security risk.
+func WithDisableFileReads(disable bool) ContextOption {
+	return func(ctx *Context) {
+		ctx.disableFileReads = disable
+	}
+}
+
+// DisableFileReads returns whether file reads (LOAD_FILE/LOAD DATA INFILE) are disabled for this context.
+func (c *Context) DisableFileReads() bool {
+	if c == nil {
+		return false
+	}
+	return c.disableFileReads
 }
 
 var ctxNowFunc = time.Now

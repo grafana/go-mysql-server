@@ -70,6 +70,11 @@ func (l *LoadFile) IsNullable() bool {
 // TODO: Allow FILE privileges for GRANT
 // Eval implements sql.Expression.
 func (l *LoadFile) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
+	// Check if file reads are disabled for this context
+	if ctx.DisableFileReads() {
+		return nil, sql.ErrFileReadsDisabled.New()
+	}
+
 	dir, err := ctx.Session.GetSessionVariable(ctx, "secure_file_priv")
 	if err != nil {
 		return "", err
