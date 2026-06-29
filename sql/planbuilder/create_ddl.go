@@ -58,7 +58,7 @@ func (b *Builder) buildCreateTrigger(inScope *scope, subQuery string, fullQuery 
 		b.handleErr(sql.ErrDatabaseSchemaNotFound.New(c.Table.SchemaQualifier.String()))
 	}
 
-	tableScope, ok := b.buildResolvedTableForTablename(inScope, c.Table, nil, nil)
+	tableScope, ok := b.buildResolvedTableForTablename(inScope, c.Table, nil)
 	if !ok {
 		b.handleErr(sql.ErrTableNotFound.New(c.Table.Name.String()))
 	}
