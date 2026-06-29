@@ -297,7 +297,7 @@ func (b *Builder) buildDataSource(inScope *scope, te ast.TableExpr) (outScope *s
 				outScope.parent = inScope
 			} else {
 				var ok bool
-				outScope, ok = b.buildTablescan(inScope, e, t.AsOf, t.TableHints)
+				outScope, ok = b.buildTablescan(inScope, e, t.AsOf)
 				if !ok {
 					b.handleErr(sql.ErrTableNotFound.New(tableName))
 				}
@@ -635,15 +635,15 @@ func (b *Builder) buildJSONTable(inScope *scope, t *ast.JSONTableExpr) (outScope
 	return outScope
 }
 
-func (b *Builder) buildTablescan(inScope *scope, tableName ast.TableName, asof *ast.AsOf, tableHints *ast.TableHints) (outScope *scope, ok bool) {
-	return b.buildResolvedTableForTablename(inScope, tableName, asof, tableHints)
+func (b *Builder) buildTablescan(inScope *scope, tableName ast.TableName, asof *ast.AsOf) (outScope *scope, ok bool) {
+	return b.buildResolvedTableForTablename(inScope, tableName, asof)
 }
 
-func (b *Builder) buildResolvedTableForTablename(inScope *scope, tableName ast.TableName, asof *ast.AsOf, tableHints *ast.TableHints) (outScope *scope, ok bool) {
-	return b.buildResolvedTable(inScope, tableName.DbQualifier.String(), tableName.SchemaQualifier.String(), tableName.Name.String(), asof, tableHints)
+func (b *Builder) buildResolvedTableForTablename(inScope *scope, tableName ast.TableName, asof *ast.AsOf) (outScope *scope, ok bool) {
+	return b.buildResolvedTable(inScope, tableName.DbQualifier.String(), tableName.SchemaQualifier.String(), tableName.Name.String(), asof)
 }
 
-func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, asof *ast.AsOf, tableHints *ast.TableHints) (outScope *scope, ok bool) {
+func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, asof *ast.AsOf) (outScope *scope, ok bool) {
 	outScope = inScope.push()
 
 	if db == "" {
@@ -731,20 +731,6 @@ func (b *Builder) buildResolvedTable(inScope *scope, db, schema, name string, as
 	// TODO: this is maybe too broad for this method, we don't need this for some statements
 	if tab.Schema().HasVirtualColumns() {
 		tab = b.buildVirtualTableScan(db, tab)
-	}
-
-	if tableHints != nil && len(tableHints.Hints) > 0 {
-		if ht, ok := tab.(sql.TableHintedTable); ok {
-			hints := make(map[string]string, len(tableHints.Hints))
-			for _, h := range tableHints.Hints {
-				// Normalize hint keys to uppercase so downstream consumers
-				// get consistent keys regardless of SQL casing (e.g. rate/RATE/Rate → "RATE").
-				hints[strings.ToUpper(h.Name)] = h.Value
-			}
-			tab = ht.WithTableHints(hints)
-		} else {
-			b.handleErr(fmt.Errorf("table %s does not support FOR (...) hints", tab.Name()))
-		}
 	}
 
 	rt := plan.NewResolvedTable(tab, database, asOfLit)

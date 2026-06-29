@@ -255,7 +255,7 @@ func (b *Builder) buildDropTable(inScope *scope, c *ast.DDL) (outScope *scope) {
 			}
 		}
 
-		tableScope, ok := b.buildResolvedTableForTablename(inScope, t, nil, nil)
+		tableScope, ok := b.buildResolvedTableForTablename(inScope, t, nil)
 		if ok {
 			// attempting to drop a non-temporary table with DROP TEMPORARY, results in Unknown table
 			if tbl, ok := tableScope.node.(sql.Table); ok {
@@ -290,7 +290,7 @@ func getTempTable(t sql.Table) sql.TemporaryTable {
 
 func (b *Builder) buildTruncateTable(inScope *scope, c *ast.DDL) (outScope *scope) {
 	outScope = inScope.push()
-	tableScope, ok := b.buildResolvedTableForTablename(inScope, c.Table, nil, nil)
+	tableScope, ok := b.buildResolvedTableForTablename(inScope, c.Table, nil)
 	if !ok {
 		b.handleErr(sql.ErrTableNotFound.New(c.Table.Name.String()))
 	}
@@ -451,7 +451,7 @@ func (b *Builder) buildCreateTableLike(inScope *scope, ct *ast.DDL) *scope {
 	var idxDefs sql.IndexDefs
 	var checkDefs []*sql.CheckConstraint
 	for _, likeTable := range ct.OptLike.LikeTables {
-		outScope, ok = b.buildTablescan(outScope, likeTable, nil, nil)
+		outScope, ok = b.buildTablescan(outScope, likeTable, nil)
 		if !ok {
 			b.handleErr(sql.ErrTableNotFound.New(likeTable.Name.String()))
 		}
@@ -586,7 +586,7 @@ func (b *Builder) buildAlterTableClause(inScope *scope, ddl *ast.DDL) []*scope {
 		outScopes = append(outScopes, b.buildRenameTable(inScope, ddl))
 	} else {
 		var ok bool
-		tableScope, ok := b.buildResolvedTableForTablename(inScope, ddl.Table, nil, nil)
+		tableScope, ok := b.buildResolvedTableForTablename(inScope, ddl.Table, nil)
 		if !ok {
 			b.handleErr(sql.ErrTableNotFound.New(ddl.Table.Name.String()))
 		}
@@ -1252,7 +1252,7 @@ func (b *Builder) buildExternalCreateIndex(inScope *scope, ddl *ast.DDL) (outSco
 	tblName := strings.ToLower(ddl.Table.Name.String())
 
 	var ok bool
-	outScope, ok = b.buildTablescan(inScope, ddl.Table, nil, nil)
+	outScope, ok = b.buildTablescan(inScope, ddl.Table, nil)
 	if !ok {
 		b.handleErr(sql.ErrTableNotFound.New(tblName))
 	}

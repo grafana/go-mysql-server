@@ -44,7 +44,7 @@ func (b *Builder) buildAnalyze(inScope *scope, n *ast.Analyze, query string) (ou
 		b.handleErr(sql.ErrNoDatabaseSelected.New())
 	}
 
-	tableScope, ok := b.buildTablescan(inScope, n.Tables[0], nil, nil)
+	tableScope, ok := b.buildTablescan(inScope, n.Tables[0], nil)
 	if !ok {
 		err := sql.ErrTableNotFound.New(strings.ToLower(n.Tables[0].Name.String()))
 		b.handleErr(err)
@@ -99,7 +99,7 @@ func (b *Builder) buildAnalyzeTables(inScope *scope, n *ast.Analyze, query strin
 		}
 
 		tableName := strings.ToLower(table.Name.String())
-		tableScope, ok := b.buildTablescan(inScope, table, nil, nil)
+		tableScope, ok := b.buildTablescan(inScope, table, nil)
 		if !ok {
 			err := sql.ErrTableNotFound.New(tableName)
 			b.handleErr(err)

@@ -41,7 +41,7 @@ func (b *Builder) buildInsert(inScope *scope, i *ast.Insert) (outScope *scope) {
 		inScope = b.buildWith(inScope, i.With)
 	}
 
-	destScope, ok := b.buildResolvedTableForTablename(inScope, i.Table, nil, nil)
+	destScope, ok := b.buildResolvedTableForTablename(inScope, i.Table, nil)
 	if !ok {
 		b.handleErr(sql.ErrTableNotFound.New(i.Table.Name.String()))
 	}
@@ -486,7 +486,7 @@ func (b *Builder) buildDelete(inScope *scope, d *ast.Delete) (outScope *scope) {
 					return false
 				})
 			} else {
-				tableScope, ok := b.buildResolvedTableForTablename(inScope, tableName, nil, nil)
+				tableScope, ok := b.buildResolvedTableForTablename(inScope, tableName, nil)
 				if !ok {
 					b.handleErr(sql.ErrTableNotFound.New(tabName))
 				}
