@@ -2,7 +2,7 @@ module github.com/dolthub/go-mysql-server/integration/go
 
 go 1.22
 
-toolchain go1.24.1
+toolchain go1.26.10
 
 require (
 	github.com/go-mysql-org/go-mysql v1.12.0
