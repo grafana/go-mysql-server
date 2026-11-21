@@ -618,6 +618,55 @@ FROM task_instance INNER JOIN job ON job.id = task_instance.queued_by_job_id INN
 		},
 	},
 	{
+		Name: "UNION chains generalize column types over every part",
+		SetUpScript: []string{
+			"CREATE TABLE t (a BIGINT NOT NULL, b TEXT NOT NULL)",
+			"INSERT INTO t VALUES (0, 'r0'), (1, 'r1'), (2, 'r2')",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:           "SELECT a FROM t UNION ALL SELECT b FROM t",
+				ExpectedColumns: sql.Schema{{Name: "a", Type: types.LongText}},
+				Expected:        []sql.Row{{"0"}, {"1"}, {"2"}, {"r0"}, {"r1"}, {"r2"}},
+			},
+			{
+				Query:           "SELECT a FROM t UNION ALL SELECT NULL UNION ALL SELECT 1.5",
+				ExpectedColumns: sql.Schema{{Name: "a", Type: types.MustCreateDecimalType(65, 30)}},
+				Expected:        []sql.Row{{"0"}, {"1"}, {"2"}, {nil}, {"1.5"}},
+			},
+			{
+				Query:           "SELECT 1 UNION ALL SELECT 'x' UNION ALL SELECT 2.5",
+				ExpectedColumns: sql.Schema{{Name: "1", Type: types.LongText}},
+				Expected:        []sql.Row{{"1"}, {"x"}, {"2.5"}},
+			},
+			{
+				Query:           "SELECT 1 UNION ALL SELECT 2.5 UNION ALL SELECT 'x' UNION ALL SELECT NULL",
+				ExpectedColumns: sql.Schema{{Name: "1", Type: types.LongText}},
+				Expected:        []sql.Row{{"1"}, {"2.5"}, {"x"}, {nil}},
+			},
+			{
+				Query:           "(SELECT a FROM t UNION ALL SELECT b FROM t) UNION ALL SELECT 1.5",
+				ExpectedColumns: sql.Schema{{Name: "a", Type: types.LongText}},
+				Expected:        []sql.Row{{"0"}, {"1"}, {"2"}, {"r0"}, {"r1"}, {"r2"}, {"1.5"}},
+			},
+			{
+				Query:           "SELECT a FROM t UNION ALL (SELECT 1.5 UNION ALL SELECT 'x')",
+				ExpectedColumns: sql.Schema{{Name: "a", Type: types.LongText}},
+				Expected:        []sql.Row{{"0"}, {"1"}, {"2"}, {"1.5"}, {"x"}},
+			},
+			{
+				Query:           "SELECT a, b FROM t UNION SELECT b, a FROM t UNION ALL SELECT NULL, NULL",
+				ExpectedColumns: sql.Schema{{Name: "a", Type: types.LongText}, {Name: "b", Type: types.LongText}},
+				Expected:        []sql.Row{{"0", "r0"}, {"1", "r1"}, {"2", "r2"}, {"r0", "0"}, {"r1", "1"}, {"r2", "2"}, {nil, nil}},
+			},
+			{
+				Query:           "SELECT * FROM (SELECT a FROM t UNION ALL SELECT 1.5 UNION ALL SELECT a FROM t) AS u ORDER BY 1",
+				ExpectedColumns: sql.Schema{{Name: "a", Type: types.MustCreateDecimalType(65, 30)}},
+				Expected:        []sql.Row{{"0"}, {"0"}, {"1"}, {"1"}, {"1.5"}, {"2"}, {"2"}},
+			},
+		},
+	},
+	{
 		// https://github.com/dolthub/go-mysql-server/issues/3216
 		Name: "UNION ALL with BLOB columns",
 		SetUpScript: []string{
