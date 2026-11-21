@@ -95,14 +95,27 @@ func (s *SetOp) AddDispose(f sql.DisposeFunc) {
 }
 
 func (s *SetOp) Schema() sql.Schema {
-	ls := s.left.Schema()
-	rs := s.right.Schema()
+	depth := 0
+	var n sql.Node = s
+	for so, ok := n.(*SetOp); ok; so, ok = n.(*SetOp) {
+		depth++
+		n = so.left
+	}
+	rights := make([]sql.Schema, 0, depth)
+	n = s
+	for so, ok := n.(*SetOp); ok; so, ok = n.(*SetOp) {
+		rights = append(rights, so.right.Schema())
+		n = so.left
+	}
+	ls := n.Schema()
 	ret := make([]*sql.Column, len(ls))
 	for i := range ls {
 		c := *ls[i]
-		if i < len(rs) {
-			c.Type = types.GeneralizeTypes(ls[i].Type, rs[i].Type)
-			c.Nullable = ls[i].Nullable || rs[i].Nullable
+		for j := len(rights) - 1; j >= 0; j-- {
+			if rs := rights[j]; i < len(rs) {
+				c.Type = types.GeneralizeTypes(c.Type, rs[i].Type)
+				c.Nullable = c.Nullable || rs[i].Nullable
+			}
 		}
 		ret[i] = &c
 	}
