@@ -1,7 +1,7 @@
 module github.com/dolthub/go-mysql-server
 
 require (
-	github.com/cespare/xxhash/v2 v2.2.0
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dolthub/flatbuffers/v23 v23.3.3-dh.2
 	github.com/dolthub/jsonpath v0.0.2-0.20240227200619-19675ab05c71
 	github.com/dolthub/sqllogictest/go v0.0.0-20201107003712-816f3ae12d81
@@ -15,9 +15,9 @@ require (
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/shopspring/decimal v1.4.0
 	github.com/sirupsen/logrus v1.8.3
-	github.com/stretchr/testify v1.9.0
-	go.opentelemetry.io/otel v1.31.0
-	go.opentelemetry.io/otel/trace v1.31.0
+	github.com/stretchr/testify v1.12.1
+	go.opentelemetry.io/otel v1.47.0
+	go.opentelemetry.io/otel/trace v1.47.0
 	golang.org/x/sync v0.18.0
 	golang.org/x/sys v0.38.0
 	golang.org/x/text v0.31.0
@@ -33,6 +33,7 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/telemetry v0.0.0-20251008203120-078029d740a8 // indirect
@@ -41,6 +42,6 @@ require (
 	gopkg.in/check.v1 v1.0.0-20200902074654-038fdea0a05b // indirect
 )
 
-go 1.25.6
+go 1.26.0
 
 replace github.com/dolthub/vitess => github.com/grafana/vitess v0.0.0-grafana-2
